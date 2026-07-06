@@ -1,32 +1,53 @@
 import { useState, useRef } from 'react';
 import { Mic, Square, Loader2 } from 'lucide-react';
+
 interface AudioInputProps {
   onTranslate: (text: string) => void;
 }
+
+interface BrowserSpeechRecognition {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+
+type BrowserSpeechRecognitionConstructor = new () => BrowserSpeechRecognition;
+
+type SpeechRecognitionWindow = Window & {
+  SpeechRecognition?: BrowserSpeechRecognitionConstructor;
+  webkitSpeechRecognition?: BrowserSpeechRecognitionConstructor;
+};
+
 export function AudioInput({
   onTranslate
 }: AudioInputProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [recordedText, setRecordedText] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
-  const recognitionRef = useRef<any>(null);
+  const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const startRecording = () => {
     setIsRecording(true);
     setRecordedText('');
     // Check if browser supports SpeechRecognition
-    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-      // @ts-ignore - TypeScript doesn't know about webkitSpeechRecognition
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const speechWindow = window as unknown as SpeechRecognitionWindow;
+    if (speechWindow.webkitSpeechRecognition || speechWindow.SpeechRecognition) {
+      const SpeechRecognition = speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition;
       if (SpeechRecognition) {
-        recognitionRef.current = new SpeechRecognition();
-        recognitionRef.current.lang = 'zh-CN'; // Set language to Chinese
-        recognitionRef.current.continuous = true;
-        recognitionRef.current.interimResults = true;
-        recognitionRef.current.onresult = (event: any) => {
-          const transcript = Array.from(event.results).map((result: any) => result[0].transcript).join('');
+        const recognition = new SpeechRecognition();
+        recognition.lang = 'zh-CN'; // Set language to Chinese
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.onresult = (event) => {
+          const transcript = Array.from(event.results)
+            .map((result) => result[0].transcript)
+            .join('');
           setRecordedText(transcript);
         };
-        recognitionRef.current.start();
+        recognitionRef.current = recognition;
+        recognition.start();
       }
     } else {
       // Mock recording for browsers that don't support SpeechRecognition

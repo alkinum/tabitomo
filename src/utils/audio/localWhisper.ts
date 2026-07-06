@@ -144,7 +144,7 @@ class LocalWhisperService {
       const result = await transcribe({
         model: modelSize,
         channelWaveform,
-        language: options.language as any,
+        language: options.language as Parameters<typeof transcribe>[0]['language'],
       });
 
       // Concatenate all transcription items into a single string

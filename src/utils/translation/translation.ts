@@ -262,7 +262,7 @@ Do not include any other text, explanation, or markdown formatting.`,
         // If no recognized field found, throw error
         throw new Error('Translation response does not contain a valid translation field');
       } catch (parseError) {
-        console.warn('Failed to parse JSON response, using raw text:', result.text);
+        console.warn('Failed to parse JSON response, using raw text:', result.text, parseError);
         // Fallback: return the raw text if JSON parsing fails, but strip thinking tags
         let cleanText = result.text;
         cleanText = cleanText.replace(/<think>[\s\S]*?<\/think>/gi, '');

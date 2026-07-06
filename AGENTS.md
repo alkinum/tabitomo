@@ -25,7 +25,7 @@
 ## 🛠️ Tech Stack
 
 ### Core Technologies
-- **Framework:** React 18 with TypeScript
+- **Framework:** React 19 with TypeScript
 - **Build Tool:** Vite
 - **Package Manager:** pnpm
 - **Styling:** UnoCSS with Tailwind preset (replacing Tailwind CSS)
@@ -67,7 +67,7 @@ tabitomo/
 ├── uno.config.ts                    # UnoCSS configuration (to be added)
 ├── tsconfig.json                    # TypeScript config
 ├── package.json                     # Dependencies
-└── CLAUDE.md                        # This file
+└── AGENTS.md                        # This file
 ```
 
 ## 🎨 Design System

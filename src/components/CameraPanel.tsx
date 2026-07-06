@@ -96,7 +96,6 @@ export const CameraPanel: React.FC<CameraPanelProps> = ({ isOpen, onClose, onCap
   const switchCamera = () => {
     const newMode = facingMode === 'environment' ? 'user' : 'environment';
     setFacingMode(newMode);
-    startCamera(newMode);
   };
 
   useEffect(() => {
@@ -109,7 +108,7 @@ export const CameraPanel: React.FC<CameraPanelProps> = ({ isOpen, onClose, onCap
     return () => {
       stopCamera();
     };
-  }, [isOpen]);
+  }, [isOpen, facingMode]);
 
   if (!isOpen) return null;
 
