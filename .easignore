@@ -1,0 +1,11 @@
+node_modules/
+dist/
+dev-dist/
+output/
+playwright-report/
+test-results/
+logs/
+*.log
+.DS_Store
+.history/
+.claude/settings.local.json

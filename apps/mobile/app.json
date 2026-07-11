@@ -1,0 +1,82 @@
+{
+  "expo": {
+    "name": "tabitomo",
+    "slug": "tabitomo",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "tabitomo",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "appleTeamId": "PB8H83VL3Z",
+      "bundleIdentifier": "com.backrunner.tabitomo",
+      "buildNumber": "1",
+      "privacyManifests": {
+        "NSPrivacyAccessedAPITypes": [],
+        "NSPrivacyCollectedDataTypes": [],
+        "NSPrivacyTracking": false,
+        "NSPrivacyTrackingDomains": []
+      },
+      "entitlements": {
+        "com.apple.developer.icloud-container-identifiers": [
+          "iCloud.com.backrunner.tabitomo"
+        ],
+        "com.apple.developer.icloud-services": [
+          "CloudKit"
+        ],
+        "com.apple.developer.ubiquity-kvstore-identifier": "$(TeamIdentifierPrefix)com.backrunner.tabitomo"
+      },
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSMicrophoneUsageDescription": "Allow tabitomo to record speech for translation.",
+        "NSSpeechRecognitionUsageDescription": "Allow tabitomo to recognize speech for voice translation."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow tabitomo to read travel photos for image translation.",
+          "cameraPermission": "Allow tabitomo to capture signs, menus, and labels for translation.",
+          "microphonePermission": "Allow tabitomo to record speech for translation."
+        }
+      ],
+      "expo-secure-store",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow tabitomo to record speech for translation."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow tabitomo to scan encrypted settings QR codes.",
+          "microphonePermission": "Allow tabitomo to record speech for translation.",
+          "barcodeScannerEnabled": true
+        }
+      ],
+      "expo-asset",
+      "expo-sharing",
+      [
+        "./plugins/withXcodeManagedSigning.js",
+        {
+          "deploymentTarget": "16.4"
+        }
+      ]
+    ]
+  }
+}
