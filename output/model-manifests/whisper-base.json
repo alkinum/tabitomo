@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "packs": [
+    {
+      "id": "whisper-base",
+      "feature": "asr",
+      "runtime": "sherpa-onnx-ios",
+      "version": "2026.07.11",
+      "minAppVersion": "0.1.0",
+      "minIOS": "16.4",
+      "bytes": 160610353,
+      "license": "MIT",
+      "label": "Whisper Base",
+      "description": "Whisper Base files distributed by tabitomo for verified on-device download.",
+      "files": [
+        {
+          "name": "base-decoder.int8.onnx",
+          "url": "https://assets.tabitomo.alkinum.io/models/asr/whisper-base/files/2026.07.11/base-decoder.int8.onnx",
+          "sha256": "9759d217388a01b3a4c7c15533201067b48ae819c4daafc8624e64b9409dc02d",
+          "bytes": 130672026
+        },
+        {
+          "name": "base-encoder.int8.onnx",
+          "url": "https://assets.tabitomo.alkinum.io/models/asr/whisper-base/files/2026.07.11/base-encoder.int8.onnx",
+          "sha256": "0b8fb1304b6109976038efff5ace81720e00386f3ff6b54ee8c75291ca0a1e11",
+          "bytes": 29120534
+        },
+        {
+          "name": "base-tokens.txt",
+          "url": "https://assets.tabitomo.alkinum.io/models/asr/whisper-base/files/2026.07.11/base-tokens.txt",
+          "sha256": "b34b360dbb493e781e479794586d661700670d65564001f23024971d1f2fa126",
+          "bytes": 816730
+        },
+        {
+          "name": "LICENSE.txt",
+          "url": "https://assets.tabitomo.alkinum.io/models/asr/whisper-base/files/2026.07.11/LICENSE.txt",
+          "sha256": "b5d65a59060e68c4ff940e1eddfa6f94b2d68fdf58ed7f4dd57721c997e35e9d",
+          "bytes": 1063
+        }
+      ]
+    }
+  ]
+}

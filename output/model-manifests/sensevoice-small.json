@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "packs": [
+    {
+      "id": "sensevoice-small",
+      "feature": "asr",
+      "runtime": "sherpa-onnx-ios",
+      "version": "2024.07.17-int8",
+      "minAppVersion": "0.1.0",
+      "minIOS": "16.4",
+      "bytes": 239550971,
+      "license": "MIT",
+      "label": "SenseVoice Small",
+      "description": "SenseVoice Small files distributed by tabitomo for verified on-device download.",
+      "files": [
+        {
+          "name": "LICENSE",
+          "url": "https://assets.tabitomo.alkinum.io/models/asr/sensevoice-small/files/2024.07.17-int8/LICENSE",
+          "sha256": "221c6df10b0931a5629adad671ea48fb7747e034c414b6d2bfa275bc3dd4ea17",
+          "bytes": 71
+        },
+        {
+          "name": "LICENSE-MIT.txt",
+          "url": "https://assets.tabitomo.alkinum.io/models/asr/sensevoice-small/files/2024.07.17-int8/LICENSE-MIT.txt",
+          "sha256": "f382b62dcc61fc566b9215b1e3b604b539bfd96ed52ae1eeff5090f6dc176057",
+          "bytes": 1061
+        },
+        {
+          "name": "model.int8.onnx",
+          "url": "https://assets.tabitomo.alkinum.io/models/asr/sensevoice-small/files/2024.07.17-int8/model.int8.onnx",
+          "sha256": "c71f0ce00bec95b07744e116345e33d8cbbe08cef896382cf907bf4b51a2cd51",
+          "bytes": 239233841
+        },
+        {
+          "name": "README.md",
+          "url": "https://assets.tabitomo.alkinum.io/models/asr/sensevoice-small/files/2024.07.17-int8/README.md",
+          "sha256": "763991a00edaea534ab36bf1b7cf89e61e911666dcfabbba71f91f9f7c593a63",
+          "bytes": 104
+        },
+        {
+          "name": "tokens.txt",
+          "url": "https://assets.tabitomo.alkinum.io/models/asr/sensevoice-small/files/2024.07.17-int8/tokens.txt",
+          "sha256": "f449eb28dc567533d7fa59be34e2abca8784f771850c78a47fb731a31429a1dc",
+          "bytes": 315894
+        }
+      ]
+    }
+  ]
+}
