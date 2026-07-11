@@ -1,0 +1,7 @@
+{
+  "platforms": ["apple"],
+  "apple": {
+    "modules": ["TabitomoNativeLocalModelsModule"],
+    "podspecPath": ["ios/TabitomoNativeLocalModels.podspec"]
+  }
+}
