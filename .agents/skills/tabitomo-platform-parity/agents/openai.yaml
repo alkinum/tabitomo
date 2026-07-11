@@ -1,0 +1,4 @@
+interface:
+  display_name: "tabitomo Platform Parity"
+  short_description: "Keep web and mobile behavior and design aligned"
+  default_prompt: "Use $tabitomo-platform-parity to implement this change across web and mobile without drifting their shared behavior or visual language."

@@ -106,3 +106,7 @@ tabitomo/
 - **Headings:** Bold, friendly sans-serif
 - **Body:** Clean, readable sans-serif
 - **Sizes:** Compact but legible (14-16px base)
+
+## Cross-Platform Development Skill
+
+For any feature, UI, settings, provider, persistence, import/export, or shared-core change, use the project skill at `.agents/skills/tabitomo-platform-parity/SKILL.md`. It defines the required Web/Mobile parity workflow and the iOS-first Expo exceptions.
