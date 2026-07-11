@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useRef, lazy, Suspense } from 'react';
 import { translateText, SUPPORTED_LANGUAGES, type LanguageCode } from '../utils/translation/translation';
 import { speakText, getSpeechLocale } from '../utils/audio/speech';
-import { useSiliconFlowSpeech, transcribeAudioSiliconFlow } from '../utils/audio/audioTranscription';
+import { transcribeAudioSiliconFlow } from '../utils/audio/audioTranscription';
 import { RealtimeTranscriptionService } from '../utils/audio/realtimeTranscription';
+import { localAsrService } from '../utils/audio/localAsr';
 import { performOCR, imageToBase64, streamTranslateImageWithVLM } from '../utils/image/imageOcr';
 import { explainWord, quickQA } from '../utils/translation/explanation';
 import { Mic, Image as ImageIcon, ArrowUpDown, X, Copy, Check, Volume2, Camera, Keyboard, Settings, MessageCircle } from 'lucide-react';
@@ -114,8 +115,7 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
   const imageAbortControllerRef = useRef<AbortController | null>(null);
   // Translation cache
   const translationCacheRef = useRef<Map<string, CachedTranslation>>(new Map());
-  // Check if using SiliconFlow speech recognition
-  const useSiliconFlowForSpeech = useSiliconFlowSpeech(settings);
+  const speechProvider = settings.speechRecognition.provider;
   // Toast hook
   const { toast } = useToast();
 
@@ -138,6 +138,8 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
       // Using OCR settings - check if OCR is using General AI or its own settings
       if (settings.imageOCR.useGeneralAI) {
         return isGeneralAIConfigured();
+      } else if (settings.imageOCR.provider === 'local-ppocr') {
+        return false;
       } else {
         return !!(settings.imageOCR.apiKey && settings.imageOCR.endpoint);
       }
@@ -148,6 +150,8 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
   const isOCRConfigured = () => {
     if (settings.imageOCR.useGeneralAI) {
       return isGeneralAIConfigured();
+    } else if (settings.imageOCR.provider === 'local-ppocr') {
+      return true;
     } else {
       return !!(settings.imageOCR.apiKey && settings.imageOCR.endpoint);
     }
@@ -567,8 +571,26 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
     setIsRecording(true);
     setInterimTranscript('');
 
-    // Use SiliconFlow transcription if configured
-    if (useSiliconFlowForSpeech) {
+    if (speechProvider === 'local' && !settings.speechRecognition.localModelPath?.trim()) {
+      setIsRecording(false);
+      toast({
+        variant: "destructive",
+        title: "Local Model Required",
+        description: "Set a sherpa-onnx model directory in Speech settings before using local voice input.",
+        action: (
+          <button
+            onClick={() => onOpenSettings('speech')}
+            className="px-3 py-1.5 bg-white text-indigo-600 text-xs rounded-lg hover:bg-indigo-50"
+          >
+            Open Settings
+          </button>
+        ),
+      });
+      return;
+    }
+
+    // Use cloud or local transcription providers when configured
+    if (speechProvider === 'siliconflow' || speechProvider === 'local') {
       // Check if realtime transcription is enabled
       const useRealtime = settings.speechRecognition.enableRealtimeTranscription !== false;
 
@@ -580,6 +602,7 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
           const sourceLangUsesSpaces = !['zh', 'ja', 'ko'].includes(sourceLang);
 
           realtimeTranscriptionRef.current = new RealtimeTranscriptionService(settings, {
+            sourceLang,
             onTranscript: (text: string, isFinal: boolean) => {
               console.log('[Realtime] Received transcript:', text, 'isFinal:', isFinal);
 
@@ -658,7 +681,9 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
             const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
 
             try {
-              const transcribedText = await transcribeAudioSiliconFlow(audioBlob, settings);
+              const transcribedText = speechProvider === 'local'
+                ? await localAsrService.transcribeBlob(audioBlob, settings, { sourceLang })
+                : await transcribeAudioSiliconFlow(audioBlob, settings);
               setSourceText(transcribedText);
               if (transcribedText) {
                 handleTranslate(transcribedText, sourceLang, targetLang);
@@ -747,7 +772,7 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
     }
   };
 
-  const stopRecording = () => {
+  const stopRecording = async () => {
     setIsRecording(false);
 
     // Clear any pending translation timer
@@ -759,15 +784,17 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
     // Stop realtime transcription if active
     if (realtimeTranscriptionRef.current && realtimeTranscriptionRef.current.isActive()) {
       console.log('[Realtime] Stopping realtime transcription...');
-      realtimeTranscriptionRef.current.stop();
+      const finalTranscript = await realtimeTranscriptionRef.current.stop();
       realtimeTranscriptionRef.current = null;
 
       // Clear interim transcript
       setInterimTranscript('');
 
       // Translate accumulated text if not already translating
-      if (sourceText && !isTranslating) {
-        handleTranslate(sourceText, sourceLang, targetLang);
+      const textToTranslate = (finalTranscript || sourceText).trim();
+      if (textToTranslate && !isTranslating) {
+        setSourceText(textToTranslate);
+        handleTranslate(textToTranslate, sourceLang, targetLang);
       }
       return;
     }
@@ -784,8 +811,8 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
       }
     }
 
-    // Translate after stopping (only for Web Speech API)
-    if (!useSiliconFlowForSpeech && sourceText) {
+    // Translate after stopping (only for Web Speech API; other providers translate after transcription finishes)
+    if (speechProvider === 'web-speech' && sourceText) {
       handleTranslate(sourceText, sourceLang, targetLang);
     }
   };

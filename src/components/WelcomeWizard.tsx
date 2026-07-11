@@ -1,11 +1,11 @@
 import React, { useState, useRef } from 'react';
-import { Settings as SettingsIcon, X, Upload, Scan, Eye, EyeOff, Mic, Image as ImageIcon, CheckCircle, Download, Sparkles } from 'lucide-react';
-import { AISettings, DEFAULT_SETTINGS, DASHSCOPE_ENDPOINT } from '../utils/config/settings';
+import { Settings as SettingsIcon, X, Upload, Scan, Eye, EyeOff, Mic, Image as ImageIcon, CheckCircle, Sparkles } from 'lucide-react';
+import { AISettings, DEFAULT_SETTINGS, DASHSCOPE_OCR_ENDPOINT, DASHSCOPE_OCR_INTL_ENDPOINT, API_FORMAT_OPTIONS, type APIFormat, type LocalAsrEngine, type LocalVadMode } from '../utils/config/settings';
 import { importConfigFromFile, importConfigFromQRCode } from '../utils/config/export';
 import { Html5Qrcode } from 'html5-qrcode';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Switch } from './ui/switch';
-import { localWhisperService } from '../utils/audio/localWhisper';
+import { useBackdropClose } from '../hooks/useBackdropClose';
 
 interface WelcomeWizardProps {
   isOpen: boolean;
@@ -64,9 +64,7 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onComplete
   const qrScannerRef = useRef<Html5Qrcode | null>(null);
   const [isScanning, setIsScanning] = useState(false);
 
-  // Whisper download state
-  const [isDownloadingWhisper, setIsDownloadingWhisper] = useState(false);
-  const [downloadProgress, setDownloadProgress] = useState(0);
+  const backdropCloseHandlers = useBackdropClose<HTMLDivElement>({ onClose: onSkip });
 
   if (!isOpen) return null;
 
@@ -124,33 +122,6 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onComplete
         },
       };
       onComplete(finalSettings);
-    }
-  };
-
-  const handleDownloadWhisperModel = async () => {
-    if (isDownloadingWhisper) return;
-
-    const modelSize = settings.speechRecognition.whisperModel || 'base';
-    setIsDownloadingWhisper(true);
-    setDownloadProgress(0);
-
-    try {
-      await localWhisperService.downloadModel(modelSize, (progress) => {
-        setDownloadProgress(progress.percentage);
-      });
-
-      setSettings({
-        ...settings,
-        speechRecognition: {
-          ...settings.speechRecognition,
-          whisperModelDownloaded: true,
-        },
-      });
-    } catch (error) {
-      console.error('Failed to download Whisper model:', error);
-    } finally {
-      setIsDownloadingWhisper(false);
-      setDownloadProgress(0);
     }
   };
 
@@ -254,14 +225,9 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onComplete
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200"
-      onMouseDown={(e) => {
-        // Allow clicking backdrop to skip
-        if (e.target === e.currentTarget) {
-          onSkip();
-        }
-      }}
+      {...backdropCloseHandlers}
     >
-      <div className="relative w-full max-w-md bg-white dark:bg-gray-800 rounded-3xl shadow-2xl animate-in zoom-in-95 duration-200" onMouseDown={(e) => e.stopPropagation()}>
+      <div className="relative w-full max-w-md bg-white dark:bg-gray-800 rounded-3xl shadow-2xl animate-in zoom-in-95 duration-200">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center gap-3">
@@ -358,13 +324,40 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onComplete
                   <p className="text-xs text-gray-600 dark:text-gray-400">This service will be used for all AI features (translation, image OCR, VLM)</p>
 
                   <div className="space-y-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">API Format</label>
+                    <Select
+                      value={settings.generalAI.apiFormat || DEFAULT_SETTINGS.generalAI.apiFormat}
+                      onValueChange={(value) =>
+                        setSettings({
+                          ...settings,
+                          generalAI: {
+                            ...settings.generalAI,
+                            apiFormat: value as APIFormat,
+                          },
+                        })
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select API format" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {API_FORMAT_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">API Endpoint</label>
                     <input type="text" value={settings.generalAI.endpoint} onChange={(e) => setSettings({ ...settings, generalAI: { ...settings.generalAI, endpoint: e.target.value } })} placeholder="https://api.openai.com/v1" className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors" />
                   </div>
 
                   <div className="space-y-2">
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Model Name</label>
-                    <input type="text" value={settings.generalAI.modelName} onChange={(e) => setSettings({ ...settings, generalAI: { ...settings.generalAI, modelName: e.target.value } })} placeholder="gpt-5" className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors" />
+                    <input type="text" value={settings.generalAI.modelName} onChange={(e) => setSettings({ ...settings, generalAI: { ...settings.generalAI, modelName: e.target.value } })} placeholder="gpt-5.6-terra" className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors" />
                   </div>
 
                   <div className="space-y-2">
@@ -436,10 +429,15 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onComplete
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Provider</label>
                   <Select
                     value={settings.speechRecognition.provider}
-                    onValueChange={(value: 'web-speech' | 'siliconflow' | 'local-whisper') =>
+                    onValueChange={(value: 'web-speech' | 'siliconflow' | 'local') =>
                       setSettings({
                         ...settings,
-                        speechRecognition: { ...settings.speechRecognition, provider: value },
+                        speechRecognition: {
+                          ...settings.speechRecognition,
+                          provider: value,
+                          localEngine: settings.speechRecognition.localEngine || 'whisper',
+                          vadMode: settings.speechRecognition.vadMode || 'silero',
+                        },
                       })
                     }
                   >
@@ -449,7 +447,7 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onComplete
                     <SelectContent>
                       <SelectItem value="web-speech">Web Speech API (Browser)</SelectItem>
                       <SelectItem value="siliconflow">AI Service (SiliconFlow)</SelectItem>
-                      <SelectItem value="local-whisper">Local Whisper Model</SelectItem>
+                      <SelectItem value="local">Local Model (sherpa-onnx)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -490,20 +488,73 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onComplete
                   </>
                 )}
 
-                {settings.speechRecognition.provider === 'local-whisper' && (
+                {settings.speechRecognition.provider === 'local' && (
                   <>
                     <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Model Size</label>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Local Engine</label>
                       <Select
-                        value={settings.speechRecognition.whisperModel || 'base'}
-                        onValueChange={(value: 'tiny' | 'base' | 'small') =>
+                        value={settings.speechRecognition.localEngine || 'whisper'}
+                        onValueChange={(value: LocalAsrEngine) =>
                           setSettings({
                             ...settings,
                             speechRecognition: {
                               ...settings.speechRecognition,
-                              whisperModel: value,
-                              whisperModelDownloaded: false,
+                              localEngine: value,
                             },
+                          })
+                        }
+                      >
+                        <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                          <SelectItem value="whisper">Whisper</SelectItem>
+                          <SelectItem value="sensevoice">SenseVoice</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Model Directory URL</label>
+                      <input
+                        type="text"
+                        value={settings.speechRecognition.localModelPath || ''}
+                        onChange={(e) =>
+                          setSettings({
+                            ...settings,
+                            speechRecognition: { ...settings.speechRecognition, localModelPath: e.target.value },
+                          })
+                        }
+                        placeholder="https://example.com/models/sherpa-whisper-base"
+                        className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors"
+                      />
+                      <p className="text-xs text-gray-500 dark:text-gray-400">You can leave this empty and configure it later in Settings.</p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Runtime Assets URL</label>
+                      <input
+                        type="text"
+                        value={settings.speechRecognition.localAssetBaseUrl || ''}
+                        onChange={(e) =>
+                          setSettings({
+                            ...settings,
+                            speechRecognition: { ...settings.speechRecognition, localAssetBaseUrl: e.target.value },
+                          })
+                        }
+                        placeholder="Optional separate sherpa runtime folder"
+                        className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">VAD Mode</label>
+                      <Select
+                        value={settings.speechRecognition.vadMode || 'silero'}
+                        onValueChange={(value: LocalVadMode) =>
+                          setSettings({
+                            ...settings,
+                            speechRecognition: { ...settings.speechRecognition, vadMode: value },
                           })
                         }
                       >
@@ -511,30 +562,16 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onComplete
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="tiny">Tiny (~75 MB)</SelectItem>
-                          <SelectItem value="base">Base (~145 MB)</SelectItem>
-                          <SelectItem value="small">Small (~488 MB)</SelectItem>
+                          <SelectItem value="silero">Silero VAD</SelectItem>
+                          <SelectItem value="energy">Energy fallback</SelectItem>
+                          <SelectItem value="off">Off</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
-
-                    {!settings.speechRecognition.whisperModelDownloaded && (
-                      <button onClick={handleDownloadWhisperModel} disabled={isDownloadingWhisper} className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-600/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 btn-pop">
-                        <Download className="w-4 h-4" />
-                        {isDownloadingWhisper ? `Downloading... ${downloadProgress.toFixed(0)}%` : 'Download Model'}
-                      </button>
-                    )}
-
-                    {settings.speechRecognition.whisperModelDownloaded && (
-                      <div className="p-3 bg-green-50 dark:bg-green-900/30 rounded-xl border border-green-200 dark:border-green-800 flex items-center gap-2">
-                        <CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400" />
-                        <p className="text-xs text-green-800 dark:text-green-200">Model downloaded and ready to use</p>
-                      </div>
-                    )}
                   </>
                 )}
 
-                {settings.speechRecognition.provider === 'siliconflow' && (
+                {(settings.speechRecognition.provider === 'siliconflow' || settings.speechRecognition.provider === 'local') && (
                   <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-900/50 rounded-xl">
                     <span className="text-sm text-gray-700 dark:text-gray-300">Realtime Transcription</span>
                     <Switch
@@ -597,15 +634,15 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onComplete
                             ...settings,
                             imageOCR: {
                               ...settings.imageOCR,
-                              provider: 'qwen',
-                              endpoint: settings.imageOCR.endpoint || DASHSCOPE_ENDPOINT,
+                              provider: 'local-ppocr',
+                              useGeneralAI: false,
                             },
                           })
                         }
-                        className={`p-3 rounded-xl border-2 transition-all duration-200 ${settings.imageOCR.provider === 'qwen' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
+                        className={`p-3 rounded-xl border-2 transition-all duration-200 ${settings.imageOCR.provider === 'local-ppocr' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
                       >
-                        <div className="text-sm font-bold text-gray-800 dark:text-white">Qwen VL OCR</div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Aliyun DashScope</div>
+                        <div className="text-sm font-bold text-gray-800 dark:text-white">Local</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">PP-OCRv5</div>
                       </button>
                       <button
                         onClick={() =>
@@ -613,22 +650,28 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onComplete
                             ...settings,
                             imageOCR: {
                               ...settings.imageOCR,
-                              provider: 'custom',
-                              endpoint: '',
+                              provider: 'qwen',
+                              useGeneralAI: false,
+                              endpoint: settings.imageOCR.endpoint.includes('aliyuncs.com') ? settings.imageOCR.endpoint : DASHSCOPE_OCR_ENDPOINT,
+                              modelName: settings.imageOCR.modelName || 'qwen3.5-ocr',
                             },
                           })
                         }
-                        className={`p-3 rounded-xl border-2 transition-all duration-200 ${settings.imageOCR.provider === 'custom' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
+                        className={`p-3 rounded-xl border-2 transition-all duration-200 ${settings.imageOCR.provider !== 'local-ppocr' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
                       >
-                        <div className="text-sm font-bold text-gray-800 dark:text-white">Custom</div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Your endpoint</div>
+                        <div className="text-sm font-bold text-gray-800 dark:text-white">Alibaba Qwen-OCR</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Model Studio API</div>
                       </button>
                     </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Cloud OCR currently accepts only Alibaba Cloud Model Studio / DashScope. It returns absolute coordinates for translated overlays.</p>
+                    {(settings.imageOCR.provider === 'custom' || settings.imageOCR.useGeneralAI) && (
+                      <p className="text-xs text-amber-700 dark:text-amber-300">The imported legacy OCR provider is not adapted for coordinate OCR. Choose Local or Alibaba Qwen-OCR.</p>
+                    )}
                   </div>
                 </div>
 
                 {/* Region Selection for Qwen */}
-                {settings.imageOCR.provider === 'qwen' && (
+                {settings.imageOCR.provider !== 'local-ppocr' && (
                   <div className="space-y-2">
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Region</label>
                     <div className="grid grid-cols-2 gap-2">
@@ -636,10 +679,10 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onComplete
                         onClick={() =>
                           setSettings({
                             ...settings,
-                            imageOCR: { ...settings.imageOCR, endpoint: DASHSCOPE_ENDPOINT },
+                            imageOCR: { ...settings.imageOCR, provider: 'qwen', useGeneralAI: false, endpoint: DASHSCOPE_OCR_ENDPOINT },
                           })
                         }
-                        className={`p-3 rounded-xl border-2 transition-all duration-200 ${settings.imageOCR.endpoint === DASHSCOPE_ENDPOINT ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
+                        className={`p-3 rounded-xl border-2 transition-all duration-200 ${settings.imageOCR.endpoint === DASHSCOPE_OCR_ENDPOINT ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
                       >
                         <div className="text-sm font-bold text-gray-800 dark:text-white">Beijing</div>
                         <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">China Mainland</div>
@@ -650,11 +693,13 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onComplete
                             ...settings,
                             imageOCR: {
                               ...settings.imageOCR,
-                              endpoint: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+                              provider: 'qwen',
+                              useGeneralAI: false,
+                              endpoint: DASHSCOPE_OCR_INTL_ENDPOINT,
                             },
                           })
                         }
-                        className={`p-3 rounded-xl border-2 transition-all duration-200 ${settings.imageOCR.endpoint !== DASHSCOPE_ENDPOINT ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
+                        className={`p-3 rounded-xl border-2 transition-all duration-200 ${settings.imageOCR.endpoint === DASHSCOPE_OCR_INTL_ENDPOINT ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
                       >
                         <div className="text-sm font-bold text-gray-800 dark:text-white">Singapore</div>
                         <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">International</div>
@@ -663,59 +708,56 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onComplete
                   </div>
                 )}
 
-                {/* Custom OCR Endpoint and Model */}
-                {settings.imageOCR.provider === 'custom' && (
+                {settings.imageOCR.provider !== 'local-ppocr' && (
                   <>
                     <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">API Endpoint</label>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Alibaba OCR Endpoint</label>
                       <input
                         type="text"
                         value={settings.imageOCR.endpoint || ''}
                         onChange={(e) =>
                           setSettings({
                             ...settings,
-                            imageOCR: { ...settings.imageOCR, endpoint: e.target.value },
+                            imageOCR: { ...settings.imageOCR, provider: 'qwen', useGeneralAI: false, endpoint: e.target.value },
                           })
                         }
-                        placeholder="https://api.example.com/v1"
+                        placeholder={DASHSCOPE_OCR_INTL_ENDPOINT}
                         className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors"
                       />
                     </div>
 
                     <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Model Name</label>
-                      <input
-                        type="text"
-                        value={settings.imageOCR.modelName || ''}
-                        onChange={(e) =>
-                          setSettings({
-                            ...settings,
-                            imageOCR: { ...settings.imageOCR, modelName: e.target.value },
-                          })
-                        }
-                        placeholder="model-name"
-                        className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors"
-                      />
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Qwen OCR Model</label>
+                      <Select value={settings.imageOCR.modelName || 'qwen3.5-ocr'} onValueChange={(modelName) => setSettings({ ...settings, imageOCR: { ...settings.imageOCR, provider: 'qwen', modelName } })}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="qwen3.5-ocr">qwen3.5-ocr (Recommended)</SelectItem>
+                          <SelectItem value="qwen-vl-ocr-latest">qwen-vl-ocr-latest (Compatibility)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">The advanced recognition task returns line text and coordinates for overlay translation.</p>
                     </div>
                   </>
                 )}
 
                 {/* API Key for OCR */}
-                <div className="space-y-2 pb-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">{settings.imageOCR.provider === 'qwen' ? 'DashScope API Key' : 'API Key'}</label>
-                  <input
-                    type="password"
-                    value={settings.imageOCR.apiKey || ''}
-                    onChange={(e) =>
-                      setSettings({
-                        ...settings,
-                        imageOCR: { ...settings.imageOCR, apiKey: e.target.value },
-                      })
-                    }
-                    placeholder="sk-..."
-                    className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors"
-                  />
-                </div>
+                {settings.imageOCR.provider !== 'local-ppocr' && (
+                  <div className="space-y-2 pb-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Alibaba Model Studio API Key</label>
+                    <input
+                      type="password"
+                      value={settings.imageOCR.apiKey || ''}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          imageOCR: { ...settings.imageOCR, apiKey: e.target.value },
+                        })
+                      }
+                      placeholder="sk-..."
+                      className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors"
+                    />
+                  </div>
+                )}
 
                 {/* VLM Section */}
                 <div className="space-y-3 pt-5 border-t-2 border-gray-200 dark:border-gray-700">
@@ -764,6 +806,17 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onComplete
                       </button>
                     </div>
                   </div>
+
+                  {!settings.vlm.useGeneralAI && !settings.vlm.useCustom && (
+                    <div className="space-y-2 rounded-xl border border-indigo-200 bg-indigo-50/70 p-3 dark:border-indigo-800 dark:bg-indigo-900/20">
+                      <div className="text-sm font-semibold text-gray-800 dark:text-white">OCR settings used by VLM</div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        {settings.imageOCR.provider === 'local-ppocr'
+                          ? 'Local PP-OCR extracts coordinates for the OCR overlay workflow. It is not a direct VLM; choose General AI or Custom for direct image translation.'
+                          : 'Uses the Alibaba API key and region above with qwen-vl-max-latest for direct image translation. qwen3.5-ocr remains the coordinate OCR model.'}
+                      </p>
+                    </div>
+                  )}
 
                   {!settings.vlm.useGeneralAI && settings.vlm.useCustom && (
                     <>

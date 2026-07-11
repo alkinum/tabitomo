@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { X, ArrowLeftRight, Upload, HardDriveUpload, QrCode, Scan, Eye, EyeOff, FileText } from 'lucide-react';
 import { AISettings } from '../utils/config/settings';
+import { useBackdropClose } from '../hooks/useBackdropClose';
 import {
   exportConfigToFile,
   importConfigFromFile,
@@ -203,22 +204,21 @@ export const ImportExportDialog: React.FC<ImportExportDialogProps> = ({
     onClose();
   };
 
+  const backdropCloseHandlers = useBackdropClose<HTMLDivElement>({
+    onClose: handleClose,
+    stopPropagation: true,
+  });
+
   if (!isOpen) return null;
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200"
-      onMouseDown={(e) => {
-        e.stopPropagation();
-        if (e.target === e.currentTarget) {
-          handleClose();
-        }
-      }}
+      {...backdropCloseHandlers}
       onClick={(e) => e.stopPropagation()}
     >
       <div
         className="relative w-full max-w-md bg-white dark:bg-gray-800 rounded-3xl shadow-2xl animate-in zoom-in-95 duration-200"
-        onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

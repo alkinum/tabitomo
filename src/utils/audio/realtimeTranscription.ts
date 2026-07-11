@@ -1,10 +1,12 @@
 import { VoiceActivityDetector, VADConfig, VADCallbacks } from './vad';
 import { transcribeAudioSiliconFlow } from './audioTranscription';
-import { localWhisperService } from './localWhisper';
+import { localAsrService } from './localAsr';
 import { AISettings } from '../config/settings';
+import type { LanguageCode } from '../translation/translation';
 
 export interface RealtimeTranscriptionConfig {
   vadConfig?: VADConfig;
+  sourceLang?: LanguageCode;
   onTranscript?: (text: string, isFinal: boolean) => void;
   onError?: (error: Error) => void;
 }
@@ -20,6 +22,9 @@ export class RealtimeTranscriptionService {
 
   private isRunning = false;
   private pendingTranscriptions = 0;
+  private localRealtimeActive = false;
+  private transcriptionTasks = new Set<Promise<void>>();
+  private finalTranscripts: string[] = [];
 
   constructor(settings: AISettings, config: RealtimeTranscriptionConfig = {}) {
     this.settings = settings;
@@ -36,6 +41,30 @@ export class RealtimeTranscriptionService {
     }
 
     try {
+      const provider = this.settings.speechRecognition.provider;
+      const localVadMode = this.settings.speechRecognition.vadMode || 'silero';
+
+      if (provider === 'local' && (localVadMode === 'silero' || localVadMode === 'off')) {
+        try {
+          await localAsrService.startRealtime(this.settings, this.config.sourceLang || 'en', {
+            onTranscript: (text, isFinal) => this.emitTranscript(text, isFinal),
+            onError: this.config.onError,
+          });
+          this.localRealtimeActive = true;
+          this.isRunning = true;
+          console.log(`Local realtime transcription started with ${localVadMode === 'silero' ? 'sherpa/Silero VAD' : 'full-recording mode'}`);
+          return;
+        } catch (error) {
+          await localAsrService.stopRealtime();
+
+          if (localVadMode === 'off') {
+            throw error;
+          }
+
+          console.warn('Sherpa/Silero VAD failed to start, falling back to energy VAD:', error);
+        }
+      }
+
       // Get microphone access
       this.mediaStream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -50,9 +79,9 @@ export class RealtimeTranscriptionService {
         onVoiceStart: () => {
           console.log('Voice detected, starting capture...');
         },
-        onVoiceEnd: async (audioBlob: Blob) => {
+        onVoiceEnd: (audioBlob: Blob) => {
           console.log('Voice ended, transcribing...', audioBlob.size, 'bytes');
-          await this.transcribeAudioSegment(audioBlob);
+          this.trackTranscription(this.transcribeAudioSegment(audioBlob));
         },
       };
 
@@ -74,9 +103,17 @@ export class RealtimeTranscriptionService {
   /**
    * Stop realtime transcription
    */
-  stop(): void {
+  async stop(): Promise<string> {
     if (!this.isRunning) {
-      return;
+      return this.getFinalTranscript();
+    }
+
+    if (this.localRealtimeActive) {
+      await localAsrService.stopRealtime();
+      this.localRealtimeActive = false;
+      this.isRunning = false;
+      console.log('Local realtime transcription stopped');
+      return this.getFinalTranscript();
     }
 
     // Stop VAD
@@ -92,7 +129,9 @@ export class RealtimeTranscriptionService {
     }
 
     this.isRunning = false;
+    await Promise.allSettled(Array.from(this.transcriptionTasks));
     console.log('Realtime transcription stopped');
+    return this.getFinalTranscript();
   }
 
   /**
@@ -108,33 +147,17 @@ export class RealtimeTranscriptionService {
       // Use the configured transcription provider
       const provider = this.settings.speechRecognition.provider;
 
-      if (provider === 'local-whisper') {
-        // Use local whisper transcription
-        const modelSize = this.settings.speechRecognition.whisperModel || 'base';
-
-        // Check if model is downloaded
-        if (!localWhisperService.isModelDownloaded(modelSize)) {
-          console.error('Local whisper model not downloaded');
-          if (this.config.onError) {
-            this.config.onError(new Error(`Whisper model "${modelSize}" is not downloaded. Please download it in Settings.`));
-          }
-          return;
-        }
-
-        const text = await localWhisperService.transcribe(transcriptionBlob, {
-          model: modelSize,
+      if (provider === 'local') {
+        const text = await localAsrService.transcribeBlob(transcriptionBlob, this.settings, {
+          sourceLang: this.config.sourceLang,
         });
 
-        if (text && this.config.onTranscript) {
-          this.config.onTranscript(text, true);
-        }
+        this.emitTranscript(text, true);
       } else if (provider === 'siliconflow') {
         // Use SiliconFlow transcription
         const text = await transcribeAudioSiliconFlow(transcriptionBlob, this.settings);
 
-        if (text && this.config.onTranscript) {
-          this.config.onTranscript(text, true);
-        }
+        this.emitTranscript(text, true);
       } else {
         // Fallback: use Web Speech API (not ideal for file-based transcription)
         console.warn('Web Speech API does not support file-based transcription in realtime mode');
@@ -177,5 +200,28 @@ export class RealtimeTranscriptionService {
    */
   getPendingCount(): number {
     return this.pendingTranscriptions;
+  }
+
+  getFinalTranscript(): string {
+    const separator = this.config.sourceLang && !['zh', 'zh-Hant', 'ja', 'ko'].includes(this.config.sourceLang)
+      ? ' '
+      : '';
+    return this.finalTranscripts.join(separator).trim();
+  }
+
+  private emitTranscript(text: string, isFinal: boolean): void {
+    const normalizedText = text.trim();
+    if (!normalizedText) return;
+
+    if (isFinal) {
+      this.finalTranscripts.push(normalizedText);
+    }
+
+    this.config.onTranscript?.(normalizedText, isFinal);
+  }
+
+  private trackTranscription(task: Promise<void>): void {
+    this.transcriptionTasks.add(task);
+    task.finally(() => this.transcriptionTasks.delete(task));
   }
 }

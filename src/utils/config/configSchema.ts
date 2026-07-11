@@ -4,7 +4,7 @@
  */
 
 import { schema, ObjectSchema, validateSchema as validateSchemaBase, applyDefaults } from './schema';
-import { DASHSCOPE_ENDPOINT } from './settings';
+import { DASHSCOPE_OCR_ENDPOINT } from './settings';
 
 // Re-export validation functions
 export { validateSchemaBase as validateSchema, applyDefaults };
@@ -26,12 +26,33 @@ export const translationSchema = {
  * Speech Recognition Config Schema
  */
 export const speechRecognitionSchema = {
-  provider: schema.enum(['web-speech', 'siliconflow', 'local-whisper'] as const, {
+  provider: schema.enum(['web-speech', 'siliconflow', 'local'] as const, {
     default: 'web-speech',
   }),
+  endpoint: schema.string({ optional: true, default: '' }),
   apiKey: schema.string({ optional: true }),
   modelName: schema.string({ optional: true, default: 'TeleAI/TeleSpeechASR' }),
   enableRealtimeTranscription: schema.boolean({ optional: true, default: true }),
+  localEngine: schema.enum(['whisper', 'sensevoice'] as const, {
+    optional: true,
+    default: 'whisper',
+  }),
+  localModelPath: schema.string({ optional: true, default: '' }),
+  localAssetBaseUrl: schema.string({ optional: true, default: '' }),
+  vadMode: schema.enum(['silero', 'energy', 'off'] as const, {
+    optional: true,
+    default: 'silero',
+  }),
+  senseVoiceLanguage: schema.enum(['auto', 'zh', 'en', 'ja', 'ko', 'yue'] as const, {
+    optional: true,
+    default: 'auto',
+  }),
+  senseVoiceUseItn: schema.boolean({ optional: true, default: true }),
+  whisperLanguage: schema.string({ optional: true, default: 'auto' }),
+  whisperTask: schema.enum(['transcribe', 'translate'] as const, {
+    optional: true,
+    default: 'transcribe',
+  }),
   whisperModel: schema.enum(['tiny', 'base', 'small'] as const, {
     optional: true,
     default: 'base',
@@ -45,18 +66,20 @@ export const speechRecognitionSchema = {
 export const generalAISchema = {
   apiKey: schema.string({ default: '' }),
   endpoint: schema.string({ default: '' }),
-  modelName: schema.string({ default: '' }),
+  modelName: schema.string({ default: 'gpt-5.6-terra' }),
+  apiFormat: schema.enum(['openai-chat', 'openai-responses', 'anthropic'] as const, { default: 'openai-chat' }),
 };
 
 /**
  * Image OCR Config Schema
  */
 export const imageOCRSchema = {
-  provider: schema.enum(['qwen', 'custom'] as const, { default: 'qwen' }),
+  provider: schema.enum(['local-ppocr', 'qwen', 'custom'] as const, { default: 'local-ppocr' }),
   useGeneralAI: schema.boolean({ optional: true, default: false }),
+  localModel: schema.enum(['ppocr-v5-mobile'] as const, { optional: true, default: 'ppocr-v5-mobile' }),
   apiKey: schema.string({ default: '' }),
-  endpoint: schema.string({ default: DASHSCOPE_ENDPOINT }),
-  modelName: schema.string({ optional: true }),
+  endpoint: schema.string({ default: DASHSCOPE_OCR_ENDPOINT }),
+  modelName: schema.string({ optional: true, default: 'qwen3.5-ocr' }),
 };
 
 /**
@@ -109,6 +132,7 @@ export type AIConfigV1 = {
     apiKey: string;
     endpoint: string;
     modelName: string;
+    apiFormat?: 'openai-chat' | 'openai-responses' | 'anthropic';
   };
   provider: 'openai' | 'custom';
   endpoint: string;
@@ -118,16 +142,26 @@ export type AIConfigV1 = {
     outputMode: 'plain' | 'structured';
   };
   speechRecognition: {
-    provider: 'web-speech' | 'siliconflow' | 'local-whisper';
+    provider: 'web-speech' | 'siliconflow' | 'local';
+    endpoint?: string;
     apiKey?: string;
     modelName?: string;
     enableRealtimeTranscription?: boolean;
+    localEngine?: 'whisper' | 'sensevoice';
+    localModelPath?: string;
+    localAssetBaseUrl?: string;
+    vadMode?: 'silero' | 'energy' | 'off';
+    senseVoiceLanguage?: 'auto' | 'zh' | 'en' | 'ja' | 'ko' | 'yue';
+    senseVoiceUseItn?: boolean;
+    whisperLanguage?: string;
+    whisperTask?: 'transcribe' | 'translate';
     whisperModel?: 'tiny' | 'base' | 'small';
     whisperModelDownloaded?: boolean;
   };
   imageOCR: {
-    provider: 'qwen' | 'custom';
+    provider: 'local-ppocr' | 'qwen' | 'custom';
     useGeneralAI?: boolean;
+    localModel?: 'ppocr-v5-mobile';
     apiKey: string;
     endpoint: string;
     modelName?: string;

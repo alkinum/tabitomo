@@ -10,6 +10,51 @@ import { AIConfigV1, CURRENT_SCHEMA_VERSION } from './configSchema';
  */
 type UnknownRecord = Record<string, unknown>;
 
+type SpeechProvider = 'web-speech' | 'siliconflow' | 'local';
+type LocalAsrEngine = 'whisper' | 'sensevoice';
+type LocalVadMode = 'silero' | 'energy' | 'off';
+type SenseVoiceLanguage = 'auto' | 'zh' | 'en' | 'ja' | 'ko' | 'yue';
+type WhisperTask = 'transcribe' | 'translate';
+
+const normalizeSpeechProvider = (provider: unknown): SpeechProvider => {
+  if (provider === 'local-whisper') return 'local';
+  if (provider === 'web-speech' || provider === 'siliconflow' || provider === 'local') {
+    return provider;
+  }
+  return 'web-speech';
+};
+
+const normalizeEnum = <T extends string>(value: unknown, values: readonly T[], fallback: T): T => (
+  values.includes(value as T) ? value as T : fallback
+);
+
+const normalizeSpeechRecognitionConfig = (speechRecognition: unknown): AIConfigV1['speechRecognition'] => {
+  const oldSpeechRecognition = (speechRecognition as UnknownRecord | undefined) || {};
+
+  return {
+    provider: normalizeSpeechProvider(oldSpeechRecognition.provider),
+    modelName: (oldSpeechRecognition.modelName as string | undefined) || 'TeleAI/TeleSpeechASR',
+    enableRealtimeTranscription: (oldSpeechRecognition.enableRealtimeTranscription as boolean | undefined) ?? true,
+    localEngine: normalizeEnum<LocalAsrEngine>(oldSpeechRecognition.localEngine, ['whisper', 'sensevoice'], 'whisper'),
+    localModelPath: (oldSpeechRecognition.localModelPath as string | undefined) || '',
+    localAssetBaseUrl: (oldSpeechRecognition.localAssetBaseUrl as string | undefined) || '',
+    vadMode: normalizeEnum<LocalVadMode>(oldSpeechRecognition.vadMode, ['silero', 'energy', 'off'], 'silero'),
+    senseVoiceLanguage: normalizeEnum<SenseVoiceLanguage>(oldSpeechRecognition.senseVoiceLanguage, ['auto', 'zh', 'en', 'ja', 'ko', 'yue'], 'auto'),
+    senseVoiceUseItn: (oldSpeechRecognition.senseVoiceUseItn as boolean | undefined) ?? true,
+    whisperLanguage: (oldSpeechRecognition.whisperLanguage as string | undefined) || 'auto',
+    whisperTask: normalizeEnum<WhisperTask>(oldSpeechRecognition.whisperTask, ['transcribe', 'translate'], 'transcribe'),
+    whisperModel: (oldSpeechRecognition.whisperModel as 'tiny' | 'base' | 'small' | undefined) || 'base',
+    whisperModelDownloaded: (oldSpeechRecognition.whisperModelDownloaded as boolean | undefined) ?? false,
+    ...(oldSpeechRecognition.apiKey !== undefined && { apiKey: oldSpeechRecognition.apiKey as string }),
+  };
+};
+
+const normalizeCurrentConfig = (config: UnknownRecord): AIConfigV1 => ({
+  ...(config as AIConfigV1),
+  _version: CURRENT_SCHEMA_VERSION,
+  speechRecognition: normalizeSpeechRecognitionConfig(config.speechRecognition),
+});
+
 /**
  * Migration function type
  * Takes config from version N and migrates to version N+1
@@ -37,7 +82,6 @@ const migrateV0ToV1: Migration<UnknownRecord, AIConfigV1> = {
   migrate: (oldConfig: UnknownRecord): AIConfigV1 => {
     const oldGeneralAI = (oldConfig.generalAI as UnknownRecord | undefined) || {};
     const oldTranslation = (oldConfig.translation as UnknownRecord | undefined) || {};
-    const oldSpeechRecognition = (oldConfig.speechRecognition as UnknownRecord | undefined) || {};
     const oldImageOCR = (oldConfig.imageOCR as UnknownRecord | undefined) || {};
     const oldVlm = (oldConfig.vlm as UnknownRecord | undefined) || {};
 
@@ -48,28 +92,22 @@ const migrateV0ToV1: Migration<UnknownRecord, AIConfigV1> = {
       generalAI: {
         apiKey: (oldGeneralAI.apiKey as string | undefined) || '',
         endpoint: (oldGeneralAI.endpoint as string | undefined) || '',
-        modelName: (oldGeneralAI.modelName as string | undefined) || '',
+        modelName: (oldGeneralAI.modelName as string | undefined) || 'gpt-5.6-terra',
       },
       // Ensure translation exists with defaults
       translation: {
         outputMode: (oldTranslation.outputMode as 'plain' | 'structured' | undefined) || 'structured',
       },
       // Ensure speechRecognition exists with defaults
-      speechRecognition: {
-        provider: (oldSpeechRecognition.provider as 'web-speech' | 'siliconflow' | 'local-whisper' | undefined) || 'web-speech',
-        modelName: (oldSpeechRecognition.modelName as string | undefined) || 'TeleAI/TeleSpeechASR',
-        enableRealtimeTranscription: (oldSpeechRecognition.enableRealtimeTranscription as boolean | undefined) ?? true,
-        whisperModel: (oldSpeechRecognition.whisperModel as 'tiny' | 'base' | 'small' | undefined) || 'base',
-        whisperModelDownloaded: (oldSpeechRecognition.whisperModelDownloaded as boolean | undefined) ?? false,
-        ...(oldSpeechRecognition.apiKey !== undefined && { apiKey: oldSpeechRecognition.apiKey as string }),
-      },
+      speechRecognition: normalizeSpeechRecognitionConfig(oldConfig.speechRecognition),
       // Ensure imageOCR exists with defaults
       imageOCR: {
         provider: (oldImageOCR.provider as 'qwen' | 'custom' | undefined) || 'qwen',
         useGeneralAI: (oldImageOCR.useGeneralAI as boolean | undefined) ?? false,
+        localModel: 'ppocr-v5-mobile',
         apiKey: (oldImageOCR.apiKey as string | undefined) || '',
-        endpoint: (oldImageOCR.endpoint as string | undefined) || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-        ...(oldImageOCR.modelName !== undefined && { modelName: oldImageOCR.modelName as string }),
+        endpoint: (oldImageOCR.endpoint as string | undefined) || 'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation',
+        modelName: (oldImageOCR.modelName as string | undefined) || 'qwen3.5-ocr',
       },
       // Ensure vlm exists with defaults
       vlm: {
@@ -149,7 +187,7 @@ export function migrateConfig(config: UnknownRecord): AIConfigV1 {
 
   // If already at current version, return as-is
   if (currentVersion === CURRENT_SCHEMA_VERSION) {
-    return migratedConfig as AIConfigV1;
+    return normalizeCurrentConfig(migratedConfig);
   }
 
   // If version is higher than current, this is from a newer version
@@ -176,7 +214,7 @@ export function migrateConfig(config: UnknownRecord): AIConfigV1 {
     currentVersion = migration.toVersion;
   }
 
-  return migratedConfig as AIConfigV1;
+  return normalizeCurrentConfig(migratedConfig);
 }
 
 /**

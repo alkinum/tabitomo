@@ -1,27 +1,15 @@
 import React, { useState, lazy, Suspense } from 'react';
-import { X, Save, Settings as SettingsIcon, Sparkles, Mic, Image as ImageIcon, ArrowLeftRight, Languages, Download, CheckCircle } from 'lucide-react';
-import { AISettings, saveSettings, loadSettings, DEFAULT_SETTINGS, DASHSCOPE_ENDPOINT } from '../utils/config/settings';
+import { X, Save, Settings as SettingsIcon, Sparkles, Mic, Image as ImageIcon, ArrowLeftRight, Languages, CheckCircle, AlertCircle, CircleHelp } from 'lucide-react';
+import { AISettings, saveSettings, loadSettings, DEFAULT_SETTINGS, DASHSCOPE_OCR_ENDPOINT, DASHSCOPE_OCR_INTL_ENDPOINT, API_FORMAT_OPTIONS, type APIFormat, type LocalAsrEngine, type LocalVadMode, type SenseVoiceLanguage, type WhisperTask } from '../utils/config/settings';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/Tabs';
 import { Switch } from './ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { ConfirmDialog } from './ConfirmDialog';
-import { localWhisperService, WhisperModelSize } from '../utils/audio/localWhisper';
+import { checkSherpaModelDirectory, getSherpaModelInfo } from '../utils/audio/sherpaOnnxRuntime';
 import { toast } from './ui/use-toast';
+import { useBackdropClose } from '../hooks/useBackdropClose';
 
 // Lazy load ImportExportDialog - only loaded when user opens it
 const ImportExportDialog = lazy(() => import('./ImportExportDialog').then(module => ({ default: module.ImportExportDialog })));
-
-// Network Information API types (not fully standardized)
-interface NetworkInformation {
-  saveData?: boolean;
-  effectiveType?: '4g' | '3g' | '2g' | 'slow-2g';
-}
-
-interface NavigatorWithConnection extends Navigator {
-  connection?: NetworkInformation;
-  mozConnection?: NetworkInformation;
-  webkitConnection?: NetworkInformation;
-}
 
 interface SettingsPanelProps {
   isOpen: boolean;
@@ -29,6 +17,25 @@ interface SettingsPanelProps {
   onSave: (settings: AISettings) => void;
   initialTab?: 'general' | 'translation' | 'speech' | 'image';
 }
+
+const SETTINGS_HELP: Record<'general' | 'translation' | 'speech' | 'image', { title: string; body: string }> = {
+  general: {
+    title: 'General AI',
+    body: 'General AI powers explanations, Quick Q&A, and features configured to reuse the main provider. Match the API format to your endpoint, then enter the provider model name and API key. The default model is gpt-5.6-terra.',
+  },
+  translation: {
+    title: 'Translation',
+    body: 'Use General AI for the simplest setup. Configure a separate translation service only for a specialized model or provider. Structured output improves parsing; models such as Hunyuan-MT require plain output.',
+  },
+  speech: {
+    title: 'Speech',
+    body: 'Browser speech uses the browser recognition service. Cloud speech uploads recordings to your configured transcription endpoint. Local Whisper and SenseVoice models run in the browser runtime and may require a substantial first download.',
+  },
+  image: {
+    title: 'Images',
+    body: 'OCR extracts text and coordinates before translation. Local uses PP-OCR v5. Cloud OCR currently supports Alibaba Cloud Model Studio Qwen-OCR only, using the native advanced_recognition response for accurate overlay coordinates. A normal OpenAI-compatible VLM endpoint is not an adapted OCR API.',
+  },
+};
 
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, onSave, initialTab = 'general' }) => {
   const [settings, setSettings] = useState<AISettings>(() => {
@@ -47,19 +54,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
   });
   const [isSaving, setIsSaving] = useState(false);
   const [showImportExport, setShowImportExport] = useState(false);
+  const [showSettingsHelp, setShowSettingsHelp] = useState(false);
   const [activeTab, setActiveTab] = useState(initialTab);
 
-  // Local Whisper model download state
-  const [isDownloadingModel, setIsDownloadingModel] = useState(false);
-  const [downloadProgress, setDownloadProgress] = useState(0);
-  const [showDownloadConfirm, setShowDownloadConfirm] = useState(false);
-  const [downloadConfirmInfo, setDownloadConfirmInfo] = useState({ networkType: '', modelSize: '', size: '' });
-  const [currentModelDownloaded, setCurrentModelDownloaded] = useState(false);
-
-  // Initialize local whisper service on mount
-  React.useEffect(() => {
-    localWhisperService.initialize();
-  }, []);
+  const [isCheckingLocalModel, setIsCheckingLocalModel] = useState(false);
+  const [localModelStatus, setLocalModelStatus] = useState<{ ok: boolean; message: string } | null>(null);
+  const backdropCloseHandlers = useBackdropClose<HTMLDivElement>({ onClose });
 
   // Reload settings when dialog opens
   React.useEffect(() => {
@@ -77,21 +77,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
       }
       setSettings(loaded);
       setActiveTab(initialTab);
+      setShowSettingsHelp(false);
     }
   }, [isOpen, initialTab]);
-
-  // Check if current model is downloaded whenever the model changes
-  React.useEffect(() => {
-    const checkModelDownloaded = async () => {
-      const modelSize = settings.speechRecognition.whisperModel || 'base';
-      const isDownloaded = await localWhisperService.isModelDownloadedAsync(modelSize);
-      setCurrentModelDownloaded(isDownloaded);
-    };
-
-    if (settings.speechRecognition.provider === 'local-whisper') {
-      checkModelDownloaded();
-    }
-  }, [settings.speechRecognition.whisperModel, settings.speechRecognition.provider, settings.speechRecognition.whisperModelDownloaded]);
 
   const handleSave = () => {
     setIsSaving(true);
@@ -110,75 +98,33 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
     onSave(importedSettings);
   };
 
-  // Download whisper model
-  const handleDownloadModel = async () => {
-    const modelSize = settings.speechRecognition.whisperModel || 'base';
-    const modelInfo = localWhisperService.getModelInfo(modelSize as WhisperModelSize);
-
-    // Detect if user is on mobile or metered connection
-    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    const nav = navigator as NavigatorWithConnection;
-    const connection = nav.connection || nav.mozConnection || nav.webkitConnection;
-    const isMetered = connection?.saveData || connection?.effectiveType === 'slow-2g' || connection?.effectiveType === '2g' || connection?.effectiveType === '3g';
-
-    // Show confirmation if on mobile or metered network
-    if (isMobile || isMetered) {
-      const networkType = isMetered ? 'metered/slow' : 'mobile';
-      setDownloadConfirmInfo({
-        networkType,
-        modelSize,
-        size: modelInfo.size,
-      });
-      setShowDownloadConfirm(true);
-    } else {
-      // Directly download if not on mobile/metered network
-      await executeDownload();
-    }
-  };
-
-  // Execute model download
-  const executeDownload = async () => {
-    const modelSize = settings.speechRecognition.whisperModel || 'base';
-
+  const handleCheckLocalModel = async () => {
     try {
-      setIsDownloadingModel(true);
-      setDownloadProgress(0);
-
-      await localWhisperService.downloadModel(modelSize as WhisperModelSize, (progress) => {
-        setDownloadProgress(progress.percentage);
-      });
-
-      // Update settings to mark model as downloaded
-      const updatedSettings = {
-        ...settings,
-        speechRecognition: {
-          ...settings.speechRecognition,
-          whisperModelDownloaded: true
-        }
-      };
-      setSettings(updatedSettings);
-      saveSettings(updatedSettings);
-      setCurrentModelDownloaded(true);
-
-      setDownloadProgress(100);
+      setIsCheckingLocalModel(true);
+      setLocalModelStatus(null);
+      await checkSherpaModelDirectory(settings);
+      setLocalModelStatus({ ok: true, message: 'Model directory looks ready.' });
     } catch (error) {
-      console.error('Failed to download model:', error);
+      const message = error instanceof Error ? error.message : 'Failed to check model directory.';
+      setLocalModelStatus({ ok: false, message });
       toast({
-        title: 'Download Failed',
-        description: 'Failed to download model. Please try again.',
+        title: 'Model Check Failed',
+        description: message,
         variant: 'destructive',
       });
     } finally {
-      setIsDownloadingModel(false);
+      setIsCheckingLocalModel(false);
     }
   };
 
   if (!isOpen) return null;
 
+  const localModelInfo = getSherpaModelInfo(settings);
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200"
-      onClick={onClose}
+      {...backdropCloseHandlers}
     >
       <div
         className="relative w-full max-w-md bg-white dark:bg-gray-800 rounded-3xl shadow-2xl animate-in zoom-in-95 duration-200"
@@ -195,6 +141,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
             </h2>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowSettingsHelp(true)}
+              className="p-2 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-300 hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded-lg transition-all duration-200 btn-pop"
+              title={`About ${SETTINGS_HELP[activeTab].title}`}
+              aria-label={`About ${SETTINGS_HELP[activeTab].title}`}
+            >
+              <CircleHelp className="w-5 h-5" />
+            </button>
             <button
               onClick={() => setShowImportExport(true)}
               className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded-lg transition-all duration-200 btn-pop"
@@ -236,10 +191,32 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
             {/* General AI Service Tab */}
             <TabsContent value="general">
               <div className="space-y-4">
-                <div className="p-3 bg-indigo-50 dark:bg-indigo-900/30 rounded-xl border border-indigo-200 dark:border-indigo-800">
-                  <p className="text-sm text-indigo-800 dark:text-indigo-200">
-                    <strong>General AI Service</strong> is used by default for all features (translation, image OCR, VLM) unless you configure them separately in their respective tabs.
-                  </p>
+                {/* API Format */}
+                <div className="space-y-1.5">
+                  <label htmlFor="generalApiFormat" className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
+                    API Format
+                  </label>
+                  <Select
+                    value={settings.generalAI.apiFormat || DEFAULT_SETTINGS.generalAI.apiFormat}
+                    onValueChange={(value) => setSettings({
+                      ...settings,
+                      generalAI: {
+                        ...settings.generalAI,
+                        apiFormat: value as APIFormat,
+                      },
+                    })}
+                  >
+                    <SelectTrigger id="generalApiFormat">
+                      <SelectValue placeholder="Select API format" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {API_FORMAT_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 {/* API Endpoint */}
@@ -267,7 +244,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
                     type="text"
                     value={settings.generalAI.modelName}
                     onChange={(e) => setSettings({ ...settings, generalAI: { ...settings.generalAI, modelName: e.target.value } })}
-                    placeholder="gpt-4o"
+                    placeholder="gpt-5.6-terra"
                     className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors"
                   />
                 </div>
@@ -435,7 +412,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
                     <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
                       Provider
                     </label>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-2 gap-2">
                       <button
                         onClick={() => setSettings({ ...settings, speechRecognition: { ...settings.speechRecognition, provider: 'web-speech' } })}
                         className={`p-3 rounded-xl border-2 transition-all duration-200 ${settings.speechRecognition.provider === 'web-speech' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
@@ -462,10 +439,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
                           ...settings,
                           speechRecognition: {
                             ...settings.speechRecognition,
-                            provider: 'local-whisper'
+                            provider: 'local',
+                            localEngine: settings.speechRecognition.localEngine || 'whisper',
+                            vadMode: settings.speechRecognition.vadMode || 'silero'
                           }
                         })}
-                        className={`p-3 rounded-xl border-2 transition-all duration-200 ${settings.speechRecognition.provider === 'local-whisper' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
+                        className={`p-3 rounded-xl border-2 transition-all duration-200 ${settings.speechRecognition.provider === 'local' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
                       >
                         <div className="text-sm font-bold text-gray-800 dark:text-white">Local Model</div>
                         <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Offline</div>
@@ -532,84 +511,217 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
                     </>
                   )}
 
-                  {settings.speechRecognition.provider === 'local-whisper' && (
+                  {settings.speechRecognition.provider === 'local' && (
                     <>
                       <div className="space-y-1.5">
-                        <label htmlFor="localModelType" className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
-                          Local Model Type
-                        </label>
-                        <Select value="whisper" disabled>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select model type" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="whisper">Whisper</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-1.5">
                         <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
-                          Whisper Model Size
+                          Local Engine
                         </label>
                         <div className="grid grid-cols-2 gap-2">
-                          {(['tiny', 'base', 'small'] as WhisperModelSize[]).map((size) => {
-                            const modelInfo = localWhisperService.getModelInfo(size);
-                            return (
-                              <button
-                                key={size}
-                                onClick={async () => {
-                                  // Check if the model is already downloaded
-                                  const isDownloaded = await localWhisperService.isModelDownloadedAsync(size);
-                                  setSettings({
-                                    ...settings,
-                                    speechRecognition: {
-                                      ...settings.speechRecognition,
-                                      whisperModel: size,
-                                      whisperModelDownloaded: isDownloaded
-                                    }
-                                  });
-                                }}
-                                className={`p-3 rounded-xl border-2 transition-all duration-200 ${settings.speechRecognition.whisperModel === size ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
-                              >
-                                <div className="text-sm font-bold text-gray-800 dark:text-white capitalize">{size}</div>
-                                <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{modelInfo.size}</div>
-                              </button>
-                            );
-                          })}
+                          {(['whisper', 'sensevoice'] as LocalAsrEngine[]).map((engine) => (
+                            <button
+                              key={engine}
+                              onClick={() => {
+                                setLocalModelStatus(null);
+                                setSettings({
+                                  ...settings,
+                                  speechRecognition: {
+                                    ...settings.speechRecognition,
+                                    localEngine: engine,
+                                  },
+                                });
+                              }}
+                              className={`p-3 rounded-xl border-2 transition-all duration-200 ${settings.speechRecognition.localEngine === engine ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
+                            >
+                              <div className="text-sm font-bold text-gray-800 dark:text-white">{engine === 'whisper' ? 'Whisper' : 'SenseVoice'}</div>
+                              <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{engine === 'whisper' ? 'General ASR' : 'ZH/EN/JA/KO/YUE'}</div>
+                            </button>
+                          ))}
                         </div>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label htmlFor="localModelPath" className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
+                          Model Directory URL
+                        </label>
+                        <input
+                          id="localModelPath"
+                          type="text"
+                          value={settings.speechRecognition.localModelPath || ''}
+                          onChange={(e) => {
+                            setLocalModelStatus(null);
+                            setSettings({
+                              ...settings,
+                              speechRecognition: {
+                                ...settings.speechRecognition,
+                                localModelPath: e.target.value,
+                              },
+                            });
+                          }}
+                          placeholder="https://example.com/models/sherpa-whisper-base"
+                          className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors"
+                        />
                         <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                          {localWhisperService.getModelInfo(settings.speechRecognition.whisperModel || 'base').description}
+                          {localModelInfo.description}
                         </p>
                       </div>
 
-                      {/* Model Download Button */}
                       <div className="space-y-1.5">
-                        {currentModelDownloaded ? (
-                          <div className="flex items-center gap-2 p-3 bg-green-50 dark:bg-green-900/30 rounded-xl border border-green-200 dark:border-green-800">
-                            <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400" />
-                            <div className="flex-1">
-                              <div className="text-sm font-semibold text-green-800 dark:text-green-200">Model Downloaded</div>
-                              <div className="text-xs text-green-600 dark:text-green-400">Ready for offline transcription</div>
-                            </div>
+                        <label htmlFor="localAssetBaseUrl" className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
+                          Runtime Assets URL
+                        </label>
+                        <input
+                          id="localAssetBaseUrl"
+                          type="text"
+                          value={settings.speechRecognition.localAssetBaseUrl || ''}
+                          onChange={(e) => {
+                            setLocalModelStatus(null);
+                            setSettings({
+                              ...settings,
+                              speechRecognition: {
+                                ...settings.speechRecognition,
+                                localAssetBaseUrl: e.target.value,
+                              },
+                            });
+                          }}
+                          placeholder="Leave empty to use the model directory"
+                          className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors"
+                        />
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                          Optional separate folder for sherpa-onnx .js/.wasm/.data runtime files.
+                        </p>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
+                          VAD Mode
+                        </label>
+                        <Select
+                          value={settings.speechRecognition.vadMode || 'silero'}
+                          onValueChange={(value: LocalVadMode) => setSettings({
+                            ...settings,
+                            speechRecognition: {
+                              ...settings.speechRecognition,
+                              vadMode: value,
+                            },
+                          })}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="silero">Silero VAD</SelectItem>
+                            <SelectItem value="energy">Energy fallback</SelectItem>
+                            <SelectItem value="off">Off</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {settings.speechRecognition.localEngine === 'whisper' && (
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="space-y-1.5">
+                            <label htmlFor="whisperLanguage" className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
+                              Language
+                            </label>
+                            <input
+                              id="whisperLanguage"
+                              type="text"
+                              value={settings.speechRecognition.whisperLanguage || 'auto'}
+                              onChange={(e) => setSettings({
+                                ...settings,
+                                speechRecognition: {
+                                  ...settings.speechRecognition,
+                                  whisperLanguage: e.target.value,
+                                },
+                              })}
+                              className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors"
+                            />
                           </div>
-                        ) : (
-                          <button
-                            onClick={handleDownloadModel}
-                            disabled={isDownloadingModel}
-                            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-indigo-500 text-white font-semibold rounded-xl cute-shadow hover:bg-indigo-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 btn-pop"
-                          >
-                            {isDownloadingModel ? (
-                              <>
-                                <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></div>
-                                <span>Downloading... {Math.round(downloadProgress)}%</span>
-                              </>
-                            ) : (
-                              <>
-                                <Download className="w-4 h-4" />
-                                <span>Download {settings.speechRecognition.whisperModel || 'base'} Model</span>
-                              </>
-                            )}
-                          </button>
+                          <div className="space-y-1.5">
+                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
+                              Task
+                            </label>
+                            <Select
+                              value={settings.speechRecognition.whisperTask || 'transcribe'}
+                              onValueChange={(value: WhisperTask) => setSettings({
+                                ...settings,
+                                speechRecognition: {
+                                  ...settings.speechRecognition,
+                                  whisperTask: value,
+                                },
+                              })}
+                            >
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="transcribe">Transcribe</SelectItem>
+                                <SelectItem value="translate">Translate</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                      )}
+
+                      {settings.speechRecognition.localEngine === 'sensevoice' && (
+                        <div className="space-y-1.5">
+                          <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
+                            SenseVoice Language
+                          </label>
+                          <div className="flex gap-2">
+                            <Select
+                              value={settings.speechRecognition.senseVoiceLanguage || 'auto'}
+                              onValueChange={(value: SenseVoiceLanguage) => setSettings({
+                                ...settings,
+                                speechRecognition: {
+                                  ...settings.speechRecognition,
+                                  senseVoiceLanguage: value,
+                                },
+                              })}
+                            >
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="auto">Auto</SelectItem>
+                                <SelectItem value="zh">Chinese</SelectItem>
+                                <SelectItem value="en">English</SelectItem>
+                                <SelectItem value="ja">Japanese</SelectItem>
+                                <SelectItem value="ko">Korean</SelectItem>
+                                <SelectItem value="yue">Cantonese</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <label className="flex items-center gap-2 px-3 py-2 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-300">
+                              <input
+                                type="checkbox"
+                                checked={settings.speechRecognition.senseVoiceUseItn !== false}
+                                onChange={(e) => setSettings({
+                                  ...settings,
+                                  speechRecognition: {
+                                    ...settings.speechRecognition,
+                                    senseVoiceUseItn: e.target.checked,
+                                  },
+                                })}
+                              />
+                              ITN
+                            </label>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="space-y-2">
+                        <button
+                          onClick={handleCheckLocalModel}
+                          disabled={isCheckingLocalModel || !settings.speechRecognition.localModelPath?.trim()}
+                          className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-indigo-500 text-white font-semibold rounded-xl cute-shadow hover:bg-indigo-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 btn-pop"
+                        >
+                          {isCheckingLocalModel ? 'Checking...' : `Check ${localModelInfo.label} Model`}
+                        </button>
+                        {localModelStatus && (
+                          <div className={`flex items-start gap-2 p-3 rounded-xl border ${localModelStatus.ok ? 'bg-green-50 dark:bg-green-900/30 border-green-200 dark:border-green-800' : 'bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800'}`}>
+                            {localModelStatus.ok ? <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400 mt-0.5" /> : <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400 mt-0.5" />}
+                            <p className={`text-xs ${localModelStatus.ok ? 'text-green-700 dark:text-green-200' : 'text-red-700 dark:text-red-200'}`}>{localModelStatus.message}</p>
+                          </div>
                         )}
                       </div>
                     </>
@@ -648,7 +760,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
                     <br />
                     <strong>AI Service:</strong> Cloud-based AI providers (SiliconFlow) with better accuracy for multiple languages.
                     <br />
-                    <strong>Local Model:</strong> Run speech recognition models (Whisper) locally in your browser (requires model download, fully offline).
+                    <strong>Local Model:</strong> Runs sherpa-onnx Whisper or SenseVoice from a configured model directory URL.
                   </p>
                 </div>
               </div>
@@ -667,56 +779,62 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
                     <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
                       OCR Provider
                     </label>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-3 gap-2">
+                      <button
+                        onClick={() => setSettings({
+                          ...settings,
+                          imageOCR: {
+                            ...settings.imageOCR,
+                            provider: 'local-ppocr',
+                            useGeneralAI: false,
+                          }
+                        })}
+                        className={`p-3 rounded-xl border-2 transition-all duration-200 ${settings.imageOCR.provider === 'local-ppocr' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
+                      >
+                        <div className="text-sm font-bold text-gray-800 dark:text-white">Local</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">PP-OCRv5</div>
+                      </button>
                       <button
                         onClick={() => setSettings({
                           ...settings,
                           imageOCR: {
                             ...settings.imageOCR,
                             provider: 'qwen',
-                            endpoint: settings.imageOCR.endpoint || DASHSCOPE_ENDPOINT
+                            useGeneralAI: false,
+                            endpoint: settings.imageOCR.endpoint.includes('aliyuncs.com') ? settings.imageOCR.endpoint : DASHSCOPE_OCR_ENDPOINT,
+                            modelName: settings.imageOCR.modelName || 'qwen3.5-ocr',
                           }
                         })}
-                        className={`p-3 rounded-xl border-2 transition-all duration-200 ${settings.imageOCR.provider === 'qwen' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
+                        className={`p-3 rounded-xl border-2 transition-all duration-200 ${settings.imageOCR.provider !== 'local-ppocr' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
                       >
-                        <div className="text-sm font-bold text-gray-800 dark:text-white">Qwen VL OCR</div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Aliyun DashScope</div>
-                      </button>
-                      <button
-                        onClick={() => setSettings({
-                          ...settings,
-                          imageOCR: {
-                            ...settings.imageOCR,
-                            provider: 'custom',
-                            endpoint: ''
-                          }
-                        })}
-                        className={`p-3 rounded-xl border-2 transition-all duration-200 ${settings.imageOCR.provider === 'custom' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
-                      >
-                        <div className="text-sm font-bold text-gray-800 dark:text-white">Custom</div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Your endpoint</div>
+                        <div className="text-sm font-bold text-gray-800 dark:text-white">Alibaba Qwen-OCR</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Model Studio API</div>
                       </button>
                     </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Cloud OCR accepts an Alibaba Cloud Model Studio / DashScope API key and native OCR endpoint. Other OCR providers are not adapted yet.</p>
+                    {(settings.imageOCR.provider === 'custom' || settings.imageOCR.useGeneralAI) && (
+                      <p className="text-xs text-amber-700 dark:text-amber-300">This imported legacy OCR configuration is not an adapted coordinate API. Select Local or Alibaba Qwen-OCR before using OCR.</p>
+                    )}
                   </div>
                 </div>
 
                 {/* Region Selection for Qwen */}
-                {settings.imageOCR.provider === 'qwen' && (
+                {settings.imageOCR.provider !== 'local-ppocr' && (
                   <div className="space-y-2">
                     <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
                       Region
                     </label>
                     <div className="grid grid-cols-2 gap-2">
                       <button
-                        onClick={() => setSettings({ ...settings, imageOCR: { ...settings.imageOCR, endpoint: DASHSCOPE_ENDPOINT } })}
-                        className={`p-3 rounded-xl border-2 transition-all duration-200 ${settings.imageOCR.endpoint === DASHSCOPE_ENDPOINT ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
+                        onClick={() => setSettings({ ...settings, imageOCR: { ...settings.imageOCR, provider: 'qwen', useGeneralAI: false, endpoint: DASHSCOPE_OCR_ENDPOINT } })}
+                        className={`p-3 rounded-xl border-2 transition-all duration-200 ${settings.imageOCR.endpoint === DASHSCOPE_OCR_ENDPOINT ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
                       >
                         <div className="text-sm font-bold text-gray-800 dark:text-white">Beijing</div>
                         <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">China Mainland</div>
                       </button>
                       <button
-                        onClick={() => setSettings({ ...settings, imageOCR: { ...settings.imageOCR, endpoint: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1' } })}
-                        className={`p-3 rounded-xl border-2 transition-all duration-200 ${settings.imageOCR.endpoint !== DASHSCOPE_ENDPOINT ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
+                        onClick={() => setSettings({ ...settings, imageOCR: { ...settings.imageOCR, provider: 'qwen', useGeneralAI: false, endpoint: DASHSCOPE_OCR_INTL_ENDPOINT } })}
+                        className={`p-3 rounded-xl border-2 transition-all duration-200 ${settings.imageOCR.endpoint === DASHSCOPE_OCR_INTL_ENDPOINT ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
                       >
                         <div className="text-sm font-bold text-gray-800 dark:text-white">Singapore</div>
                         <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">International</div>
@@ -725,52 +843,51 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
                   </div>
                 )}
 
-                {/* Custom OCR Endpoint */}
-                {settings.imageOCR.provider === 'custom' && (
+                {settings.imageOCR.provider !== 'local-ppocr' && (
                   <>
                     <div className="space-y-1.5">
                       <label htmlFor="ocrEndpoint" className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
-                        OCR API Endpoint
+                        Alibaba OCR Endpoint
                       </label>
                       <input
                         id="ocrEndpoint"
                         type="text"
                         value={settings.imageOCR.endpoint}
-                        onChange={(e) => setSettings({ ...settings, imageOCR: { ...settings.imageOCR, endpoint: e.target.value } })}
-                        placeholder="https://api.example.com/v1"
+                        onChange={(e) => setSettings({ ...settings, imageOCR: { ...settings.imageOCR, provider: 'qwen', useGeneralAI: false, endpoint: e.target.value } })}
+                        placeholder={DASHSCOPE_OCR_INTL_ENDPOINT}
                         className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors"
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <label htmlFor="ocrModel" className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
-                        OCR Model Name
-                      </label>
-                      <input
-                        id="ocrModel"
-                        type="text"
-                        value={settings.imageOCR.modelName || ''}
-                        onChange={(e) => setSettings({ ...settings, imageOCR: { ...settings.imageOCR, modelName: e.target.value } })}
-                        placeholder="model-name"
-                        className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors"
-                      />
+                      <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300">Qwen OCR Model</label>
+                      <Select value={settings.imageOCR.modelName || 'qwen3.5-ocr'} onValueChange={(modelName) => setSettings({ ...settings, imageOCR: { ...settings.imageOCR, provider: 'qwen', modelName } })}>
+                        <SelectTrigger aria-label="Qwen OCR model"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="qwen3.5-ocr">qwen3.5-ocr (Recommended)</SelectItem>
+                          <SelectItem value="qwen-vl-ocr-latest">qwen-vl-ocr-latest (Compatibility)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">advanced_recognition returns line text, four-point absolute coordinates, and rotation data for translated overlays.</p>
                     </div>
                   </>
                 )}
 
                 {/* API Key */}
-                <div className="space-y-1.5">
-                  <label htmlFor="imageApiKey" className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
-                    {settings.imageOCR.provider === 'qwen' ? 'DashScope API Key' : 'API Key'}
-                  </label>
-                  <input
-                    id="imageApiKey"
-                    type="password"
-                    value={settings.imageOCR.apiKey}
-                    onChange={(e) => setSettings({ ...settings, imageOCR: { ...settings.imageOCR, apiKey: e.target.value } })}
-                    placeholder="sk-..."
-                    className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors"
-                  />
-                </div>
+                {settings.imageOCR.provider !== 'local-ppocr' && (
+                  <div className="space-y-1.5">
+                    <label htmlFor="imageApiKey" className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
+                      Alibaba Model Studio API Key
+                    </label>
+                    <input
+                      id="imageApiKey"
+                      type="password"
+                      value={settings.imageOCR.apiKey}
+                      onChange={(e) => setSettings({ ...settings, imageOCR: { ...settings.imageOCR, apiKey: e.target.value } })}
+                      placeholder="sk-..."
+                      className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors"
+                    />
+                  </div>
+                )}
 
                 {/* VLM Section */}
                 <div className="space-y-3 pt-3 border-t-2 border-gray-200 dark:border-gray-700">
@@ -806,6 +923,66 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
                       </button>
                     </div>
                   </div>
+
+                  {!settings.vlm.useGeneralAI && !settings.vlm.useCustom && (
+                    <div className="space-y-3 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/70 dark:bg-indigo-900/20 p-3">
+                      <div>
+                        <div className="text-sm font-semibold text-gray-800 dark:text-white">OCR settings used by VLM</div>
+                        <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">Alibaba credentials and region are shared with OCR above. Direct translation uses qwen-vl-max-latest; the OCR model remains dedicated to coordinate extraction.</p>
+                      </div>
+                      <Select
+                        value={settings.imageOCR.provider === 'local-ppocr' ? 'local-ppocr' : 'qwen'}
+                        onValueChange={(provider) => setSettings({
+                          ...settings,
+                          imageOCR: {
+                            ...settings.imageOCR,
+                            provider: provider as 'local-ppocr' | 'qwen',
+                            useGeneralAI: false,
+                            localModel: provider === 'local-ppocr' ? 'ppocr-v5-mobile' : settings.imageOCR.localModel,
+                            endpoint: provider === 'qwen' && !settings.imageOCR.endpoint.includes('aliyuncs.com') ? DASHSCOPE_OCR_ENDPOINT : settings.imageOCR.endpoint,
+                          },
+                        })}
+                      >
+                        <SelectTrigger aria-label="VLM OCR provider">
+                          <SelectValue placeholder="Select OCR provider" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="local-ppocr">Local PP-OCR v5</SelectItem>
+                          <SelectItem value="qwen">Alibaba Qwen-OCR</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {settings.imageOCR.provider === 'local-ppocr' && (
+                        <p className="text-xs text-gray-500 dark:text-gray-400">Local PP-OCR is an OCR pipeline, not a VLM. In OCR overlay mode it extracts local coordinates before line-by-line translation; choose General AI or Custom for direct VLM translation.</p>
+                      )}
+                      {settings.imageOCR.provider !== 'local-ppocr' && (
+                        <>
+                          <input
+                            type="text"
+                            aria-label="VLM OCR endpoint"
+                            value={settings.imageOCR.endpoint}
+                            onChange={(event) => setSettings({ ...settings, imageOCR: { ...settings.imageOCR, endpoint: event.target.value } })}
+                            placeholder={DASHSCOPE_OCR_INTL_ENDPOINT}
+                            className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors"
+                          />
+                          <Select value={settings.imageOCR.modelName || 'qwen3.5-ocr'} onValueChange={(modelName) => setSettings({ ...settings, imageOCR: { ...settings.imageOCR, provider: 'qwen', modelName } })}>
+                            <SelectTrigger aria-label="VLM OCR model"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="qwen3.5-ocr">qwen3.5-ocr (Recommended)</SelectItem>
+                              <SelectItem value="qwen-vl-ocr-latest">qwen-vl-ocr-latest (Compatibility)</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <input
+                            type="password"
+                            aria-label="VLM OCR API key"
+                            value={settings.imageOCR.apiKey}
+                            onChange={(event) => setSettings({ ...settings, imageOCR: { ...settings.imageOCR, apiKey: event.target.value } })}
+                            placeholder="OCR API key"
+                            className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors"
+                          />
+                        </>
+                      )}
+                    </div>
+                  )}
 
                   {!settings.vlm.useGeneralAI && settings.vlm.useCustom && (
                     <>
@@ -876,6 +1053,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
                   <p className="text-sm text-indigo-800 dark:text-indigo-200">
                     <strong>OCR Mode:</strong> Recognizes text regions and overlays translations on image.
                     <br />
+                    <strong>Local:</strong> Runs PP-OCRv5 in your browser. Models are downloaded on first use.
+                    <br />
                     <strong>VLM Mode:</strong> Directly translates image content using vision models (text output only).
                     <br />
                     <strong>Tip:</strong> VLM defaults to General AI service. Configure it in the General tab.
@@ -909,18 +1088,40 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
         />
       </Suspense>
 
-      {/* Download Confirmation Dialog */}
-      <ConfirmDialog
-        isOpen={showDownloadConfirm}
-        onClose={() => setShowDownloadConfirm(false)}
-        onConfirm={executeDownload}
-        title="Download Model"
-        description={`You are on a ${downloadConfirmInfo.networkType} network. Downloading the "${downloadConfirmInfo.modelSize}" model will use approximately ${downloadConfirmInfo.size} of data. Do you want to continue?`}
-        confirmText="Download"
-        cancelText="Cancel"
-        variant="warning"
-        icon="download"
-      />
+      {showSettingsHelp && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/45"
+          onClick={() => setShowSettingsHelp(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="settings-help-title"
+            className="w-full max-w-sm rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 id="settings-help-title" className="text-base font-bold text-gray-900 dark:text-white">
+                  {SETTINGS_HELP[activeTab].title}
+                </h3>
+                <p className="mt-2 text-sm leading-6 text-gray-600 dark:text-gray-300">
+                  {SETTINGS_HELP[activeTab].body}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSettingsHelp(false)}
+                className="shrink-0 p-2 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg"
+                aria-label="Close settings help"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };

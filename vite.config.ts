@@ -30,7 +30,7 @@ export default defineConfig(({ mode }) => ({
       name: 'configure-response-headers',
       configureServer(server) {
         server.middlewares.use((req, res, next) => {
-          // Add cross-origin isolation headers for Whisper.wasm (SharedArrayBuffer support)
+          // Add cross-origin isolation headers for local WASM runtimes (SharedArrayBuffer support)
           res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
           res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
 
@@ -67,7 +67,59 @@ export default defineConfig(({ mode }) => ({
         skipWaiting: true,
         clientsClaim: true,
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,wasm}'],
+        globIgnores: [
+          // Local PP-OCR pulls large ONNX/OpenCV assets. Keep them lazy and cache on demand.
+          '**/vendor-ocr-*.js',
+          '**/localPpocrWorker-*.js',
+          '**/worker-entry-*.js',
+          '**/ort.bundle.min-*.js',
+          '**/ort-*.wasm',
+          // Local ASR pulls sherpa runtime/model assets lazily from a user-configured directory.
+          '**/vendor-asr-*.js',
+          '**/easy-asr*.js',
+          '**/sherpa-onnx-*.js',
+          '**/sherpa-onnx-*.wasm',
+          '**/sherpa-onnx-*.data',
+          '**/*.onnx',
+          '**/tokens.txt',
+        ],
         runtimeCaching: [
+          {
+            urlPattern: ({ url }) => /\.(?:wasm|js|data|onnx|txt)$/i.test(url.pathname) && (
+              url.pathname.includes('sherpa') ||
+              url.pathname.includes('sensevoice') ||
+              url.pathname.includes('sense-voice') ||
+              url.pathname.includes('whisper') ||
+              url.pathname.endsWith('/tokens.txt') ||
+              url.pathname.endsWith('.onnx')
+            ),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'local-asr-runtime-cache',
+              expiration: {
+                maxEntries: 24,
+                maxAgeSeconds: 30 * 24 * 60 * 60 // 30 days
+              },
+              cacheableResponse: {
+                statuses: [0, 200, 206]
+              },
+              rangeRequests: true
+            }
+          },
+          {
+            urlPattern: /\/assets\/(?:vendor-ocr|localPpocrWorker|worker-entry|ort\.bundle\.min)-.*\.js$/,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'ocr-runtime-cache',
+              expiration: {
+                maxEntries: 8,
+                maxAgeSeconds: 365 * 24 * 60 * 60 // 1 year
+              },
+              cacheableResponse: {
+                statuses: [0, 200]
+              }
+            }
+          },
           {
             urlPattern: /\/kuromoji\/dict\/.*\.gz$/,
             handler: 'CacheFirst',
@@ -171,10 +223,18 @@ export default defineConfig(({ mode }) => ({
             return 'vendor-ai';
           }
 
-          // Whisper Web (WASM-based, very large) - separate chunk for lazy loading
-          if (id.includes('node_modules/@remotion/whisper-web/') ||
-              id.includes('@remotion/whisper')) {
-            return 'vendor-whisper';
+          // Local ASR wrapper/runtime entry stays lazy and separate from the app shell.
+          if (id.includes('node_modules/speech-asr/')) {
+            return 'vendor-asr';
+          }
+
+          // Local PP-OCR dependencies are large and are only needed for image OCR.
+          if (id.includes('node_modules/@paddleocr/paddleocr-js/') ||
+              id.includes('node_modules/onnxruntime-web/') ||
+              id.includes('node_modules/@techstark/opencv-js/') ||
+              id.includes('node_modules/clipper-lib/') ||
+              id.includes('node_modules/protobufjs/')) {
+            return 'vendor-ocr';
           }
 
           // Utilities used throughout the app
@@ -186,7 +246,7 @@ export default defineConfig(({ mode }) => ({
           }
 
           // Let Vite auto-bundle everything else, including:
-          // - whisper (dynamically imported)
+          // - local ASR runtime (configured externally and loaded lazily)
           // - QR libraries (dynamically imported)
           // - Japanese libs (dynamically imported)
           // - Image processing (dynamically imported)
