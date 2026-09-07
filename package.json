@@ -4,7 +4,7 @@
   "type": "module",
   "license": "Apache-2.0",
   "author": "BackRunner",
-  "packageManager": "pnpm@11.10.0",
+  "packageManager": "pnpm@12.3.4",
   "scripts": {
     "dev": "vite",
     "dev:wrangler": "wrangler pages dev --port 5173 -- vite",
