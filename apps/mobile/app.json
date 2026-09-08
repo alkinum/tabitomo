@@ -30,7 +30,12 @@
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSMicrophoneUsageDescription": "Allow tabitomo to record speech for translation.",
-        "NSSpeechRecognitionUsageDescription": "Allow tabitomo to recognize speech for voice translation."
+        "NSSpeechRecognitionUsageDescription": "Allow tabitomo to recognize speech for voice translation.",
+        "NSLocalNetworkUsageDescription": "Allow tabitomo to connect to AI models running on a computer on your local network.",
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": false,
+          "NSAllowsLocalNetworking": true
+        }
       }
     },
     "android": {
@@ -76,7 +81,8 @@
         {
           "deploymentTarget": "16.4"
         }
-      ]
+      ],
+      "./plugins/withSceneLifecycle.js"
     ]
   }
 }

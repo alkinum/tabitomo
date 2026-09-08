@@ -13,7 +13,7 @@ const WelcomeWizard = lazy(() => import('./components/WelcomeWizard').then(modul
 export function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<'general' | 'translation' | 'speech' | 'image'>('general');
-  const [currentSettings, setCurrentSettings] = useState<AISettings | null>(null);
+  const [currentSettings, setCurrentSettings] = useState<AISettings | null>(DEFAULT_SETTINGS);
   const [isLoading, setIsLoading] = useState(true);
   const [showWelcomeWizard, setShowWelcomeWizard] = useState(false);
 
@@ -79,7 +79,7 @@ export function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 dark:from-gray-900 dark:via-indigo-950 dark:to-purple-950 flex items-center justify-center p-4" style={{
+    <div className="app-canvas min-h-screen flex items-center justify-center p-4" style={{
       paddingTop: 'max(1rem, env(safe-area-inset-top))',
       paddingBottom: 'max(1rem, env(safe-area-inset-bottom))',
       paddingLeft: 'max(1rem, env(safe-area-inset-left))',

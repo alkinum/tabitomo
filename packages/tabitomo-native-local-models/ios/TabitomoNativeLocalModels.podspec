@@ -6,7 +6,7 @@ Pod::Spec.new do |s|
   s.name           = 'TabitomoNativeLocalModels'
   s.version        = package['version']
   s.summary        = 'Verified on-device ASR and OCR runtimes for tabitomo'
-  s.description    = 'Expo module using sherpa-onnx for Whisper/SenseVoice and ONNX Runtime for PP-OCR v5.'
+  s.description    = 'Expo module using sherpa-onnx for Whisper/SenseVoice and ONNX Runtime for PP-OCR v6 Small.'
   s.license        = 'Apache-2.0'
   s.author         = 'tabitomo'
   s.homepage       = 'https://tabitomo.alkinum.io'

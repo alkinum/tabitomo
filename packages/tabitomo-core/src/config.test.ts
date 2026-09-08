@@ -28,6 +28,7 @@ test('normalizeSettings migrates legacy speech provider and invalid enum values'
     },
     imageOCR: {
       provider: 'bad-provider',
+      localModel: 'ppocr-v5-mobile',
       apiKey: 'ocr-key',
       endpoint: 'https://ocr.example.com/v1',
     },
@@ -41,6 +42,7 @@ test('normalizeSettings migrates legacy speech provider and invalid enum values'
   assert.equal(normalized.speechRecognition.whisperTask, DEFAULT_SETTINGS.speechRecognition.whisperTask);
   assert.equal(normalized.imageOCR.provider, DEFAULT_SETTINGS.imageOCR.provider);
   assert.equal(normalized.imageOCR.endpoint, 'https://ocr.example.com/v1');
+  assert.equal(normalized.imageOCR.localModel, 'ppocr-v6-small');
 });
 
 test('normalizeSettings selects plain output for Hunyuan-MT translation providers', () => {
@@ -91,6 +93,7 @@ test('wrapConfigForExport emits normalized versioned payloads', () => {
   assert.equal(wrapped.config._version, 1);
   assert.equal(wrapped.config.speechRecognition.provider, 'local');
   assert.equal(wrapped.config.imageOCR.provider, 'local-ppocr');
+  assert.equal(wrapped.config.imageOCR.localModel, 'ppocr-v6-small');
   assert.match(wrapped.exportedAt, /^\d{4}-\d{2}-\d{2}T/);
 });
 

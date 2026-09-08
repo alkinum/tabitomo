@@ -1,3 +1,4 @@
+import { isLocalProviderEndpoint } from './settings';
 import type { APIFormat } from './settings';
 
 export interface ProviderConfig {
@@ -340,7 +341,7 @@ export async function generateProviderText(
   messages: ProviderMessage[],
   abortSignal?: AbortSignal
 ): Promise<string> {
-  if (!config.apiKey.trim()) {
+  if (!config.apiKey.trim() && !isLocalProviderEndpoint(config.endpoint)) {
     throw new Error('API key is not configured');
   }
   if (!config.endpoint.trim()) {
@@ -384,7 +385,7 @@ export async function generateProviderText(
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        authorization: `Bearer ${config.apiKey}`,
+        ...(config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {}),
       },
       body: JSON.stringify({
         model: config.modelName,
@@ -407,7 +408,7 @@ export async function generateProviderText(
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      authorization: `Bearer ${config.apiKey}`,
+      ...(config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {}),
     },
     body: JSON.stringify({
       model: config.modelName,
@@ -428,7 +429,7 @@ export async function* generateProviderTextStream(
   messages: ProviderMessage[],
   abortSignal?: AbortSignal
 ): AsyncGenerator<string, void, unknown> {
-  if (!config.apiKey.trim()) {
+  if (!config.apiKey.trim() && !isLocalProviderEndpoint(config.endpoint)) {
     throw new Error('API key is not configured');
   }
   if (!config.endpoint.trim()) {
@@ -474,7 +475,7 @@ export async function* generateProviderTextStream(
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        authorization: `Bearer ${config.apiKey}`,
+        ...(config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {}),
       },
       body: JSON.stringify({
         model: config.modelName,
@@ -499,7 +500,7 @@ export async function* generateProviderTextStream(
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      authorization: `Bearer ${config.apiKey}`,
+      ...(config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {}),
     },
     body: JSON.stringify({
       model: config.modelName,

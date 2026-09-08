@@ -1,5 +1,12 @@
 # tabitomo App 全能力需求文档
 
+## 2026-09-08 design and provider revision
+
+Web and Expo now consume shared light/dark indigo tokens and shared settings normalization. Desktop uses two columns; phone uses native stacked panels. Settings and onboarding include OpenRouter browser authorization with pasted one-time code (PKCE, no callback URL), explicit live model discovery, editable model IDs, and direct completion after AI setup. OCR supports local geometry, General AI text extraction, custom compatible vision text extraction, and the existing explicit Qwen coordinate adapter. ASR accepts arbitrary compatible endpoints; blank model IDs no longer choose TeleAI, and credentials are reused only for the same base URL. Local-network model endpoints may omit a key. There is no bundled native VLM runtime or new claim of on-device benchmark superiority.
+
+This supersedes older ledger statements that cloud OCR only accepts Qwen, or that General AI/custom OCR is unavailable. Existing Qwen configs and the legacy `siliconflow` ASR enum remain import-compatible. See [design and model decisions](design-and-model-revision.zh-CN.md) for architecture, candidates, official sources and verification limits. Signed-device account/permissions/CloudKit/model quality checks remain required.
+
+
 状态：实施跟进中
 分支：`expo-universal-parity`
 最后更新：2026-07-09
@@ -128,7 +135,7 @@ tabitomo 是面向旅行者、语言学习者和跨语言沟通场景的 AI 翻�
 | APP-IMAGE-003 | P0 | Cloud OCR 使用已适配的阿里云 Model Studio Qwen-OCR 识别文本与绝对坐标，并逐行覆盖翻译；不把通用 VLM/custom endpoint 宣称为坐标 OCR | 已实现初版；默认 `qwen3.5-ocr`，兼容 `qwen-vl-ocr-latest` | shared core `advanced_recognition` tests、Expo Web/iOS mock image-provider；真实 Qwen OCR/iPhone 图片 QA 待完成 |
 | APP-IMAGE-004 | P0 | VLM 直接图片翻译支持流式 markdown 结果 | 已实现初版 | iOS mock image-provider；真实 VLM 待完成 |
 | APP-IMAGE-005 | P1 | OCR overlay 显示译文标签，并支持全屏 translated image lightbox | 已实现初版 | iOS `image-lightbox` smoke；真实图片对照 Web 待完成 |
-| APP-IMAGE-006 | P1 | local OCR 优先运行下载的 PP-OCR v5 Mobile，模型缺失/失效时使用 Apple Vision | 已实现初版 | native Pod build；R2 asset checks；真图菜单/招牌/收据 QA 待完成 |
+| APP-IMAGE-006 | P1 | local OCR 优先运行下载的 PP-OCR v6 Small，模型缺失/失效时使用 Apple Vision | 固定 R2 资产已发布；Release 模拟器完整下载和原生推理通过 | native Pod build；R2 asset checks；真图菜单/招牌/收据 QA 待完成 |
 | APP-IMAGE-007 | P1 | 旋转、低光、小字、长图失败时有可恢复提示 | 待真机验证 | 真实图片 QA |
 | APP-IMAGE-008 | P1 | 从文本工作台进入图片翻译时，iOS 要像 Web 图片模式一样自动反转语言方向；离开图片上下文时恢复，避免默认 `zh → ja` 误用于拍摄日文菜单/招牌 | 已实现初版；新增 image language context | parity audit 265 checks；聚焦 `main,image` iOS simulator smoke |
 
@@ -154,8 +161,8 @@ tabitomo 是面向旅行者、语言学习者和跨语言沟通场景的 AI 翻�
 | ID | 优先级 | 需求 | 当前状态 | 验收证据 |
 | --- | --- | --- | --- | --- |
 | APP-LOCAL-001 | P1 | iOS local ASR 按设置确定性运行 sherpa-onnx Whisper Base 或 SenseVoice Small，缺失/失效时使用 Apple on-device Speech | 已实现初版 | native Pod build；Mobile typecheck；真机语言/性能 QA 待完成 |
-| APP-LOCAL-002 | P1 | iOS local OCR 运行 ONNX Runtime PP-OCR v5 Mobile，缺失/失效时使用 Apple Vision | 已实现初版 | native Pod build；R2 asset checks；真图 OCR QA 待完成 |
-| APP-LOCAL-003 | P1 | Settings 显示 Active ASR / Active OCR，并提供 Whisper Base、SenseVoice Small、PP-OCR v5 Mobile 的下载、更新、删除和状态 | 已实现并自动化通过；Mobile 不再暴露 path/manifest URL | mobile parity audit；`settings-local` iOS Settings smoke 已通过 |
+| APP-LOCAL-002 | P1 | iOS local OCR 运行 ONNX Runtime PP-OCR v6 Small，缺失/失效时使用 Apple Vision | 固定 R2 资产、native adapter 和 Release 模拟器完整模型 smoke 已通过 | native Pod build；R2 asset checks；真图 OCR QA 待完成 |
+| APP-LOCAL-003 | P1 | Settings 显示 Active ASR / Active OCR，并提供 Whisper Base、SenseVoice Small、PP-OCR v6 Small 的下载、更新、删除和状态 | UI/配置已切换；Mobile 不再暴露 path/manifest URL | mobile parity audit；`settings-local` 与 `local-model-runtime-smoke` iOS smoke |
 | APP-LOCAL-004 | P1 | 固定模型资产支持下载、字节数校验、SHA-256、staging、native load 验证、替换、unload 后删除 | 已实现并自动化通过 | simulator tiny-model smoke；R2 远端资产 125 checks；真机 storage QA 待完成 |
 | APP-LOCAL-005 | P1 | model-pack 元数据不得占用 SecureStore，非秘密状态写 Documents | 已实现初版 | simulator smoke；真机 QA 待完成 |
 | APP-LOCAL-006 | P1 | sherpa-onnx iOS runtime 消费 Whisper/SenseVoice 下载文件并执行离线 ASR | 已实现初版 | isolated native build；签名 iPhone 推理/内存/延迟 QA 待完成 |
@@ -293,6 +300,13 @@ rtk env TABITOMO_IOS_RELEASE_PATH=local-xcode TABITOMO_PROVIDER_SMOKE_REQUIRED=a
 | 2026-07-11 | Expo iOS Xcode project/workspace 纳入源码管理；`app.json` + config plugin 作为 native project source of truth，统一 Automatic signing、Team `PB8H83VL3Z`、CloudKit capability、deployment target 和版本号 | clean prebuild 后签名/CloudKit 配置不漂移；Xcode 账号管理证书和 provisioning profile，脚本不保存签名凭据 |
 
 ## 11. 最新本地验收记录
+
+2026-07-15 PP-OCR v6 Small 迁移状态：
+
+- Web 已显式选择官方 `PP-OCRv6_small_det` / `PP-OCRv6_small_rec`；Mobile 默认模型 ID、配置迁移、下载/激活/UI、native module 和 Device QA 已统一为 `ppocr-v6-small`。
+- 官方 ONNX 已验证为动态 detector 输入、`3x48x动态宽度` recognizer 输入和 18,710 类输出；18,708 项字典加 blank/space 与 native CTC 解码契约一致。
+- `output/model-manifests/ppocr-v6-small.json` 对应 pack 为 31,277,677 bytes、Apache-2.0；固定 R2 manifest 和 6 个运行时文件已发布并通过 125 项远端资产检查。
+- iOS Release 模拟器从生产 R2 下载当前三个固定模型并完成原生推理；PP-OCR v6 Small 使用 ONNX Runtime，33 ms 返回 1 行。随后已从 R2 删除 PP-OCR v5 Mobile manifest 和 6 个版本化文件，公开 URL 返回 `404`。
 
 2026-07-11 固定模型、Settings 与 iCloud 同步验收：
 

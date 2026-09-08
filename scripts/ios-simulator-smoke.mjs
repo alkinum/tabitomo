@@ -430,7 +430,7 @@ try {
   await access(workspace);
 
   tempRoot = await mkdtemp(path.join(tmpdir(), 'tabitomo-ios-smoke-'));
-  const derivedDataPath = path.join(tempRoot, 'DerivedData');
+  const derivedDataPath = process.env.IOS_SMOKE_DERIVED_DATA_PATH || path.join(tempRoot, 'DerivedData');
   const artifactsDir = path.join(tempRoot, 'artifacts');
   deviceSetPath = path.join(tempRoot, 'DeviceSet');
   await mkdir(artifactsDir, { recursive: true });
@@ -512,6 +512,7 @@ try {
   await rm(qrImportSmokeResultFile, { force: true });
   tinyModelPackServer = await startTinyModelPackServer();
 
+  run('xcrun', ['simctl', '--set', deviceSetPath, 'ui', deviceId, 'appearance', 'light']);
   console.log(`Launching ${bundleId}...`);
   const launchApp = async (waitMs = 6000) => {
     run('xcrun', ['simctl', '--set', deviceSetPath, 'launch', '--terminate-running-process', deviceId, bundleId]);
@@ -540,6 +541,7 @@ try {
 
   const allSmokeScenes = [
     'main',
+    'main-keyboard',
     'config-guidance',
     'markdown',
     'longtext',
@@ -815,7 +817,7 @@ try {
       const expectedModels = {
         whisper: ['whisper-base', 'sherpa-onnx-ios'],
         senseVoice: ['sensevoice-small', 'sherpa-onnx-ios'],
-        ppocr: ['ppocr-v5-mobile', 'onnxruntime-mobile'],
+        ppocr: ['ppocr-v6-small', 'onnxruntime-mobile'],
       };
       for (const [key, [modelId, runtime]] of Object.entries(expectedModels)) {
         if (result.models?.[key]?.modelId !== modelId || result.models?.[key]?.runtime !== runtime) {

@@ -1,3 +1,4 @@
+import { isLocalProviderEndpoint } from '../config/settings';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
@@ -15,7 +16,7 @@ export function createGeneralAIModel(
   const endpoint = settings.endpoint.trim();
   const modelName = settings.modelName.trim();
 
-  if (!apiKey) {
+  if (!apiKey && !isLocalProviderEndpoint(endpoint)) {
     throw new Error('API key is not configured');
   }
 

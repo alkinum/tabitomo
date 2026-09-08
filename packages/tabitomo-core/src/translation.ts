@@ -1,5 +1,5 @@
 import { type LanguageCode, SUPPORTED_LANGUAGES } from './languages';
-import type { AISettings } from './settings';
+import { hasProviderConnection, type AISettings } from './settings';
 import { generateProviderText, type ProviderConfig } from './provider';
 
 const formatPromptPayload = (text: string): string => JSON.stringify({ text }, null, 2);
@@ -68,7 +68,7 @@ Source text JSON:
 ${formatPromptPayload(text)}`;
 
 const getTranslationProviderConfig = (settings: AISettings): ProviderConfig => {
-  const useTranslationService = Boolean(settings.apiKey && settings.endpoint && settings.modelName);
+  const useTranslationService = Boolean(hasProviderConnection(settings));
 
   if (useTranslationService) {
     return {

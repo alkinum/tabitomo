@@ -1,4 +1,4 @@
-import type { AISettings } from './settings';
+import { hasProviderConnection, type AISettings } from './settings';
 import { generateProviderText, type ProviderConfig } from './provider';
 
 export interface JapaneseFuriganaToken {
@@ -17,7 +17,7 @@ export const hasFuriganaReadings = (tokens: JapaneseFuriganaToken[] | null | und
 const plainFuriganaTokens = (text: string): JapaneseFuriganaToken[] => [{ text }];
 
 const getAnnotationProviderConfig = (settings: AISettings): ProviderConfig | null => {
-  if (settings.generalAI.apiKey && settings.generalAI.endpoint && settings.generalAI.modelName) {
+  if (hasProviderConnection(settings.generalAI)) {
     return {
       apiFormat: settings.generalAI.apiFormat || 'openai-chat',
       apiKey: settings.generalAI.apiKey,
@@ -26,7 +26,7 @@ const getAnnotationProviderConfig = (settings: AISettings): ProviderConfig | nul
     };
   }
 
-  if (settings.apiKey && settings.endpoint && settings.modelName) {
+  if (hasProviderConnection(settings)) {
     return {
       apiFormat: 'openai-chat',
       apiKey: settings.apiKey,

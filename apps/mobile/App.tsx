@@ -1,3 +1,9 @@
+import { lightTheme, darkTheme, type AppTheme } from '@tabitomo/core';
+import { OCR_HELP, LOCAL_MODEL_GUIDANCE, getOCRMode, selectOCRMode } from '@tabitomo/core';
+import { hasProviderConnection } from '@tabitomo/core';
+import { AIConnection } from './src/AIConnection';
+import { NativeMaterial, NativePreferencesProvider, useNativePreferences, selectionFeedback, actionFeedback } from './src/NativeChrome';
+import SegmentedControl from '@react-native-segmented-control/segmented-control';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -7,6 +13,8 @@ import {
   Easing,
   Image,
   InteractionManager,
+  Keyboard,
+  KeyboardAvoidingView,
   Linking,
   Modal,
   Platform,
@@ -45,9 +53,11 @@ import * as Sharing from 'expo-sharing';
 import * as Speech from 'expo-speech';
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
-  ArrowUpDown,
+  ArrowLeftRight,
+  ArrowRight,
   Camera,
   Check,
+  ChevronDown,
   CircleHelp,
   Cloud,
   Copy,
@@ -161,7 +171,7 @@ import {
   type OfflineModelDefinition,
   type OfflineModelId,
 } from './src/modelPacks';
-import Svg, { Defs, Path, Pattern, Rect } from 'react-native-svg';
+import Svg, { Rect } from 'react-native-svg';
 
 type BusyState = 'idle' | 'translating' | 'recording' | 'transcribing' | 'image';
 type ImageMode = 'ocr' | 'vlm';
@@ -187,6 +197,7 @@ interface CachedTextResult {
 }
 const SMOKE_SCENES = [
   'main',
+  'main-keyboard',
   'config-guidance',
   'settings',
   'settings-image',
@@ -434,7 +445,7 @@ const getSelectedLocalASRModelId = (settings: AISettings): 'whisper-base' | 'sen
 );
 
 const isNativeLocalModelId = (value: string): value is NativeLocalModelId => (
-  value === 'whisper-base' || value === 'sensevoice-small' || value === 'ppocr-v5-mobile'
+  value === 'whisper-base' || value === 'sensevoice-small' || value === 'ppocr-v6-small'
 );
 
 const selectInstalledModelPackById = (
@@ -445,7 +456,7 @@ const selectInstalledModelPackById = (
   selectModelPackActivation(
     installed.filter((pack) => pack.id === modelId),
     getModelPackRuntimeEnvironment(),
-    modelId === 'ppocr-v5-mobile' ? 'ocr' : 'asr',
+    modelId === 'ppocr-v6-small' ? 'ocr' : 'asr',
     nativeBaselineRuntime
   )
 );
@@ -913,7 +924,7 @@ const isMissingSecureStoreEntitlementError = (error: unknown): boolean => (
 );
 
 const isTextTranslationConfigured = (settings: AISettings): boolean => (
-  hasGeneralAISettings(settings) || Boolean(settings.apiKey && settings.endpoint && settings.modelName)
+  hasGeneralAISettings(settings) || Boolean(hasProviderConnection(settings))
 );
 
 const getTextActionKey = (
@@ -935,23 +946,24 @@ const isAbortError = (error: unknown): boolean => (
 );
 
 const isCloudImageConfigured = (settings: AISettings, mode: ImageMode): boolean => {
+  if (mode === 'ocr' && settings.imageOCR.useGeneralAI) return hasGeneralAISettings(settings);
   if (mode === 'vlm') {
     if (settings.vlm.useGeneralAI) {
       return hasGeneralAISettings(settings);
     }
     if (settings.vlm.useCustom) {
-      return Boolean(settings.vlm.apiKey && settings.vlm.endpoint && settings.vlm.modelName);
+      return Boolean(hasProviderConnection(settings.vlm));
     }
     if (settings.imageOCR.provider === 'local-ppocr') {
       return Platform.OS === 'ios';
     }
-    return settings.imageOCR.provider === 'qwen' && Boolean(settings.imageOCR.apiKey && settings.imageOCR.endpoint);
+    return hasProviderConnection(settings.imageOCR);
   }
 
   if (settings.imageOCR.provider === 'local-ppocr') {
     return true;
   }
-  return settings.imageOCR.provider === 'qwen' && Boolean(settings.imageOCR.apiKey && settings.imageOCR.endpoint);
+  return hasProviderConnection(settings.imageOCR);
 };
 
 const languageLabel = (code: LanguageCode): string => `${SUPPORTED_LANGUAGES[code]} (${code})`;
@@ -1066,141 +1078,6 @@ const buildImageDataUri = async (asset: ImagePicker.ImagePickerAsset): Promise<P
   };
 };
 
-interface AppTheme {
-  name: 'light' | 'dark';
-  gradient: readonly [string, string, string];
-  statusBarStyle: 'light' | 'dark';
-  accent: string;
-  accentStrong: string;
-  accentDeep: string;
-  secondaryAccent: string;
-  text: string;
-  inverseText: string;
-  mutedText: string;
-  subtleText: string;
-  disabledIcon: string;
-  card: string;
-  panel: string;
-  resultPanel: string;
-  chip: string;
-  miniSurface: string;
-  field: string;
-  fieldBorder: string;
-  border: string;
-  resultBorder: string;
-  activeSurface: string;
-  activeBorder: string;
-  choice: string;
-  choiceBorder: string;
-  backdrop: string;
-  shadow: string;
-  resultShadow: string;
-  overlayBackground: string;
-  overlayBorder: string;
-  overlayText: string;
-  imageBackground: string;
-  busyBackground: string;
-  footerBorder: string;
-  scanFrame: string;
-  switchTrackOff: string;
-  switchTrackOn: string;
-  switchThumbOff: string;
-  placeholder: string;
-  sourcePlaceholder: string;
-  qrLight: string;
-  qrDark: string;
-}
-
-const lightTheme: AppTheme = {
-  name: 'light',
-  gradient: ['#edf2f7', '#f4f2f6', '#f7f3f5'],
-  statusBarStyle: 'dark',
-  accent: '#6366f1',
-  accentStrong: '#4f46e5',
-  accentDeep: '#312e81',
-  secondaryAccent: '#7c3aed',
-  text: '#111827',
-  inverseText: '#ffffff',
-  mutedText: '#6b7280',
-  subtleText: '#9ca3af',
-  disabledIcon: '#9ca3af',
-  card: '#ffffff',
-  panel: 'rgba(255,255,255,0.94)',
-  resultPanel: 'rgba(255,255,255,0.96)',
-  chip: 'rgba(255,255,255,0.74)',
-  miniSurface: 'rgba(255,255,255,0.86)',
-  field: '#f8fafc',
-  fieldBorder: '#e5e7eb',
-  border: '#e0e7ff',
-  resultBorder: '#f3e8ff',
-  activeSurface: '#eef2ff',
-  activeBorder: '#a5b4fc',
-  choice: '#f4f4f5',
-  choiceBorder: '#e4e4e7',
-  backdrop: 'rgba(15,23,42,0.35)',
-  shadow: '#aab4dc',
-  resultShadow: '#e2bfdc',
-  overlayBackground: 'rgba(255,255,255,0.9)',
-  overlayBorder: 'rgba(99,102,241,0.45)',
-  overlayText: '#312e81',
-  imageBackground: '#111827',
-  busyBackground: 'rgba(79,70,229,0.92)',
-  footerBorder: '#f1f5f9',
-  scanFrame: '#a5b4fc',
-  switchTrackOff: '#d4d4d8',
-  switchTrackOn: '#c7d2fe',
-  switchThumbOff: '#ffffff',
-  placeholder: '#a1a1aa',
-  sourcePlaceholder: '#9ca3af',
-  qrLight: '#ffffff',
-  qrDark: '#111827',
-};
-
-const darkTheme: AppTheme = {
-  name: 'dark',
-  gradient: ['#383b42', '#3e3d44', '#413b42'],
-  statusBarStyle: 'light',
-  accent: '#6e719c',
-  accentStrong: '#d0cff8',
-  accentDeep: '#f1f0ff',
-  secondaryAccent: '#efb6cb',
-  text: '#f7f5fa',
-  inverseText: '#ffffff',
-  mutedText: '#d1ced8',
-  subtleText: '#aaa6b2',
-  disabledIcon: '#7f7c87',
-  card: '#2d2f38',
-  panel: '#353740',
-  resultPanel: '#3b3842',
-  chip: '#383a44',
-  miniSurface: '#353740',
-  field: '#252730',
-  fieldBorder: '#4c4e59',
-  border: '#50525d',
-  resultBorder: '#675862',
-  activeSurface: '#42444f',
-  activeBorder: '#858895',
-  choice: '#373942',
-  choiceBorder: '#50525c',
-  backdrop: 'rgba(22,23,28,0.66)',
-  shadow: '#15161c',
-  resultShadow: '#211b22',
-  overlayBackground: 'rgba(45,47,56,0.92)',
-  overlayBorder: 'rgba(208,207,248,0.48)',
-  overlayText: '#f7f5fa',
-  imageBackground: '#202129',
-  busyBackground: 'rgba(110,113,156,0.96)',
-  footerBorder: '#474954',
-  scanFrame: '#d8d5ed',
-  switchTrackOff: '#585a64',
-  switchTrackOn: '#7776af',
-  switchThumbOff: '#f1eff5',
-  placeholder: '#a29eaa',
-  sourcePlaceholder: '#aaa6b2',
-  qrLight: '#ffffff',
-  qrDark: '#111827',
-};
-
 type AppStyles = ReturnType<typeof createStyles>;
 
 const AppThemeContext = createContext<{ theme: AppTheme; styles: AppStyles } | null>(null);
@@ -1217,45 +1094,30 @@ function useAppTheme() {
   return context;
 }
 
-function BackgroundPattern() {
-  const { styles, theme } = useAppTheme();
-  const patternColor = theme.name === 'dark' ? '#8f929c' : '#aebbd1';
-  const patternOpacity = theme.name === 'dark' ? 0.11 : 0.1;
-
+export default function App() {
   return (
-    <Svg
-      aria-hidden
-      style={[styles.backgroundPattern, styles.nonInteractive]}
-      width="100%"
-      height="100%"
-    >
-      <Defs>
-        <Pattern id="tabitomo-background-pattern" width={120} height={120} patternUnits="userSpaceOnUse">
-          <Path
-            d="M20 11c.7 3.8 2.6 5.7 6.4 6.4-3.8.7-5.7 2.6-6.4 6.4-.7-3.8-2.6-5.7-6.4-6.4 3.8-.7 5.7-2.6 6.4-6.4Z"
-            fill="none"
-            stroke={patternColor}
-            strokeWidth={1.3}
-            strokeLinejoin="round"
-          />
-          <Path d="M78 84c5-4 10 4 15 0" fill="none" stroke={patternColor} strokeWidth={1.2} strokeLinecap="round" />
-        </Pattern>
-      </Defs>
-      <Rect width="100%" height="100%" fill="url(#tabitomo-background-pattern)" opacity={patternOpacity} />
-    </Svg>
+    <SafeAreaProvider>
+      <NativePreferencesProvider><AppContent /></NativePreferencesProvider>
+    </SafeAreaProvider>
   );
 }
 
-export default function App() {
+function AppContent() {
   const colorScheme = useColorScheme();
   const { width: viewportWidth } = useWindowDimensions();
   const theme = useMemo(() => getAppTheme(colorScheme), [colorScheme]);
   const styles = useMemo(() => createStyles(theme), [theme]);
   const themeContext = useMemo(() => ({ theme, styles }), [styles, theme]);
-  const stableScreenHeight = useRef(Dimensions.get('screen').height).current;
-  const appShellHeight = Math.min(Math.max(stableScreenHeight * 0.78, 500), 540);
-  const isCompactViewport = viewportWidth <= 390;
-  const sourceToolbarButtonSize = viewportWidth <= 340 ? 36 : 38;
+  const insets = useSafeAreaInsets();
+  const isCompactViewport = viewportWidth <= 430;
+  const isNarrowViewport = viewportWidth <= 340;
+  const sourceToolbarButtonSize = 44;
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  useEffect(() => {
+    const show = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow', () => setKeyboardVisible(true));
+    const hide = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide', () => setKeyboardVisible(false));
+    return () => { show.remove(); hide.remove(); };
+  }, []);
   const [settings, setSettings] = useState<AISettings>(DEFAULT_SETTINGS);
   const [isReady, setIsReady] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -1294,6 +1156,7 @@ export default function App() {
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recorderState = useAudioRecorderState(recorder);
   const isVoiceRecording = recorderState.isRecording || nativeSpeechActive;
+  const sourceInputRef = useRef<TextInput>(null);
   const textActionAbortRef = useRef<AbortController | null>(null);
   const textAutoRunTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resultCopyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1301,6 +1164,12 @@ export default function App() {
   const translationCacheRef = useRef<Map<string, CachedTextResult>>(new Map());
   const imageLanguageContextRef = useRef(false);
   const localRecordingPackRef = useRef<InstalledModelPack | null>(null);
+
+  useEffect(() => {
+    if (smokeScene !== 'main-keyboard') return;
+    const timer = setTimeout(() => sourceInputRef.current?.focus(), 450);
+    return () => clearTimeout(timer);
+  }, [smokeScene]);
 
   const applySmokeScene = useCallback((scene: SmokeScene, options: SmokeSceneOptions = {}) => {
     writeSmokeSceneAck(scene);
@@ -2353,8 +2222,8 @@ export default function App() {
         imageFile.create({ overwrite: true });
         imageFile.write(imageBytes);
 
-        const ocrPack = await installAndValidate('ppocr-v5-mobile');
-        const ocr = await recognizeTextWithNativePPOCRAsync(imageFile.uri, ocrPack.rootUri);
+        const ocrPack = await installAndValidate('ppocr-v6-small');
+        const ocr = await recognizeTextWithNativePPOCRAsync(imageFile.uri, 'ppocr-v6-small', ocrPack.rootUri);
         if (ocr.items.length === 0) {
           throw new Error('PP-OCR completed but detected no text in the deterministic CAFE fixture.');
         }
@@ -2395,7 +2264,7 @@ export default function App() {
             '## Local model runtime smoke passed',
             `- Whisper Base: ${whisper.durationMs} ms`,
             `- SenseVoice Small: ${senseVoice.durationMs} ms`,
-            `- PP-OCR v5 Mobile: ${ocr.durationMs} ms, ${ocr.items.length} line(s)`,
+            `- PP-OCR v6 Small: ${ocr.durationMs} ms, ${ocr.items.length} line(s)`,
           ].join('\n'));
           setNotice('Smoke: all fixed local models executed successfully.');
         }
@@ -2801,7 +2670,7 @@ export default function App() {
         if (cached) {
           if (!abortController.signal.aborted) {
             setTargetText(cached);
-            setNotice('Translation loaded from cache.');
+
           }
           return;
         }
@@ -3286,12 +3155,12 @@ export default function App() {
       }
 
       const installed = await loadInstalledModelPacks();
-      const pack = getReadyInstalledModelPackById(installed, 'ppocr-v5-mobile');
+      const pack = getReadyInstalledModelPackById(installed, 'ppocr-v6-small');
       if (pack) {
         try {
-          const result = await recognizeTextWithNativePPOCRAsync(nativeImageUri, pack.rootUri);
+          const result = await recognizeTextWithNativePPOCRAsync(nativeImageUri, 'ppocr-v6-small', pack.rootUri);
           ocrTexts = result.items;
-          setNotice(`Text recognized with ${pack.label || 'PP-OCR v5 Mobile'}.`);
+          setNotice(`Text recognized with ${pack.label || 'PP-OCR v6 Small'}.`);
         } catch {
           setNotice('PP-OCR could not process this image. Apple Vision was used instead.');
           ocrTexts = await recognizeTextInImageAsync(
@@ -3368,15 +3237,13 @@ export default function App() {
   if (!isReady) {
     return (
       <AppThemeContext.Provider value={themeContext}>
-        <SafeAreaProvider>
-          <LinearGradient colors={theme.gradient} style={styles.root}>
-            <StatusBar style={theme.statusBarStyle} />
-            <View style={styles.loading}>
-              <ActivityIndicator size="large" color={theme.accent} />
-              <Text style={styles.loadingText}>Loading tabitomo...</Text>
-            </View>
-          </LinearGradient>
-        </SafeAreaProvider>
+        <LinearGradient colors={theme.gradient} style={styles.root}>
+          <StatusBar style={theme.statusBarStyle} />
+          <View style={styles.loading}>
+            <ActivityIndicator size="large" color={theme.accent} />
+            <Text style={styles.loadingText}>Loading tabitomo...</Text>
+          </View>
+        </LinearGradient>
       </AppThemeContext.Provider>
     );
   }
@@ -3386,76 +3253,80 @@ export default function App() {
 
   return (
     <AppThemeContext.Provider value={themeContext}>
-      <SafeAreaProvider>
-        <LinearGradient colors={theme.gradient} style={styles.root}>
-          <BackgroundPattern />
+      <LinearGradient colors={theme.gradient} style={styles.root}>
           <StatusBar style={theme.statusBarStyle} />
-          <SafeAreaView style={styles.safeArea}>
-            <View style={[styles.appShell, { height: appShellHeight }]}>
-              <View style={styles.header}>
+          <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+            <View style={styles.appShell}>
+              <View style={[styles.header, keyboardVisible && styles.headerEditing]}>
                 <View style={styles.brandRow}>
-                  <Image source={BUDDY_IMAGE} style={styles.brandIcon} />
-                  <Text style={styles.brand}>tabitomo</Text>
+                  <Image source={BUDDY_IMAGE} style={[styles.brandIcon, keyboardVisible && styles.brandIconEditing]} />
+                  <View><Text style={[styles.brand, keyboardVisible && styles.brandEditing]}>tabitomo</Text>{!keyboardVisible && <Text style={styles.subtitle}>A little help, wherever you go.</Text>}</View>
                 </View>
+                <NativeMaterial theme={theme} style={styles.headerSettingsMaterial} interactive>
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel="Settings"
                   accessibilityHint={needsSetupAttention ? 'Setup required' : undefined}
-                  onPress={() => openSettingsAt(null)}
+                  onPress={() => { selectionFeedback(); openSettingsAt(null); }}
                   style={({ pressed }) => [
                     styles.headerSettingsButton,
                     pressed && styles.headerSettingsButtonPressed,
                   ]}
                 >
-                  <Settings size={20} color={theme.inverseText} strokeWidth={2.4} />
+                  <Settings size={20} color={theme.mutedText} strokeWidth={1.8} />
                   {needsSetupAttention && <View style={styles.settingsStatusDot} />}
                 </Pressable>
+                </NativeMaterial>
               </View>
 
-              <View style={[styles.appBody, isCompactViewport && styles.appBodyCompact]}>
-                <View style={[styles.languageBar, usesTargetOnlyLanguageBar && styles.languageBarTargetOnly]}>
+              <View style={[styles.appBody, isCompactViewport && styles.appBodyCompact, { paddingBottom: keyboardVisible ? 8 : (isCompactViewport ? 10 : 12) + insets.bottom }]}>
+                {!keyboardVisible && <TextModeSwitcher mode={textMode} onChange={handleSelectTextMode} />}
+                <NativeMaterial theme={theme} style={[styles.languageBar, usesTargetOnlyLanguageBar && styles.languageBarTargetOnly]}>
                   {usesTargetOnlyLanguageBar ? (
                     <View style={styles.targetLanguageOnly}>
                       <Text numberOfLines={1} style={styles.languageBarLabel}>Target Language</Text>
                       <View style={styles.targetLanguageButtonRow}>
-                        <LanguageButton code={targetLang} onPress={() => setLanguagePickerTarget('target')} />
+                        <LanguageButton code={targetLang} align="right" onPress={() => setLanguagePickerTarget('target')} />
                       </View>
                     </View>
                   ) : (
                     <>
                       <LanguageButton code={sourceLang} onPress={() => setLanguagePickerTarget('source')} />
-                      <IconButton icon={ArrowUpDown} label="Swap" onPress={handleSwapLanguages} compact />
+                      <IconButton icon={ArrowLeftRight} label="Swap" onPress={handleSwapLanguages} compact quiet />
                       <LanguageButton code={targetLang} onPress={() => setLanguagePickerTarget('target')} />
                     </>
                   )}
-                </View>
-
-                <TextModeSwitcher mode={textMode} onChange={handleSelectTextMode} />
+                </NativeMaterial>
 
                 <ScrollView
-                  style={styles.workspace}
-                  contentContainerStyle={styles.workspaceContent}
-                  automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+                  style={[styles.workspace, { marginHorizontal: isCompactViewport ? -16 : -20 }]}
+                  contentContainerStyle={[styles.workspaceContent, { paddingHorizontal: isCompactViewport ? 16 : 20 }]}
                   keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
                   keyboardShouldPersistTaps="handled"
                   showsVerticalScrollIndicator={false}
                 >
-                  <View style={[styles.panel, isCompactViewport && styles.panelCompact]}>
+                  <View style={styles.translationSheet}>
+                  <View style={[styles.panel, isCompactViewport && styles.panelCompact, sourceInputFocused && styles.panelFocused]}>
                     <View style={styles.panelHeader}>
                       <View style={styles.panelTitleRow}>
-                        <Languages size={17} color={theme.accentStrong} />
+                        <Languages size={16} color={theme.mutedText} strokeWidth={1.8} />
                         <Text style={styles.panelTitle}>Source</Text>
                       </View>
-                      <Text style={styles.panelMeta}>{SUPPORTED_LANGUAGES[sourceLang]}</Text>
+                      <Pressable accessibilityRole="button" accessibilityLabel="Clear" disabled={!sourceText && !imageUri} onPress={handleClear} style={({ pressed }) => [styles.clearButton, (!sourceText && !imageUri) && styles.disabled, pressed && styles.buttonPressed]}>
+                        <Eraser size={16} color={theme.mutedText} strokeWidth={1.8} />
+                        <Text style={styles.clearButtonText}>Clear</Text>
+                      </Pressable>
                     </View>
                     <View
                       style={[
                         styles.sourceInputFrame,
                         isCompactViewport && styles.sourceInputFrameCompact,
-                        sourceInputFocused && styles.sourceInputFrameFocused,
+                        isNarrowViewport && styles.sourceInputFrameNarrow,
                       ]}
                     >
                       <TextInput
+                        ref={sourceInputRef}
                         accessibilityLabel="Source text"
                         value={sourceText}
                         onChangeText={setSourceText}
@@ -3465,49 +3336,9 @@ export default function App() {
                         textAlignVertical="top"
                         onFocus={() => setSourceInputFocused(true)}
                         onBlur={() => setSourceInputFocused(false)}
-                        style={[styles.sourceInput, isCompactViewport && styles.sourceInputCompact]}
+                        style={[styles.sourceInput, isCompactViewport && styles.sourceInputCompact, isNarrowViewport && styles.sourceInputNarrow]}
                       />
-                      <View style={[styles.sourceToolbar, isCompactViewport && styles.sourceToolbarCompact]}>
-                        <View style={[styles.sourceToolbarGroup, isCompactViewport && styles.sourceToolbarGroupCompact]}>
-                          <IconButton
-                            icon={isVoiceRecording ? MicOff : Mic}
-                            label={isVoiceRecording ? 'Stop' : 'Speak'}
-                            onPress={isVoiceRecording ? handleStopRecording : handleStartRecording}
-                            disabled={busyState === 'translating' || busyState === 'image' || busyState === 'transcribing'}
-                            emphasized={isVoiceRecording}
-                            compact
-                            compactSize={sourceToolbarButtonSize}
-                          />
-                          <IconButton
-                            icon={Camera}
-                            label="Camera"
-                            onPress={() => handlePickImage('camera')}
-                            disabled={isBusy(busyState)}
-                            compact
-                            compactSize={sourceToolbarButtonSize}
-                          />
-                          <IconButton
-                            icon={ImageIcon}
-                            label="Album"
-                            onPress={() => handlePickImage('library')}
-                            disabled={isBusy(busyState)}
-                            compact
-                            compactSize={sourceToolbarButtonSize}
-                          />
-                        </View>
-                        <View style={[styles.sourceToolbarGroup, isCompactViewport && styles.sourceToolbarGroupCompact]}>
-                          <IconButton icon={Eraser} label="Clear" onPress={handleClear} compact compactSize={sourceToolbarButtonSize} />
-                          <IconButton
-                            icon={Check}
-                            label={textModeActionLabel(textMode)}
-                            onPress={() => handleRunTextMode()}
-                            disabled={!canRunTextMode || isBusy(busyState)}
-                            emphasized
-                            compact
-                            compactSize={sourceToolbarButtonSize}
-                          />
-                        </View>
-                      </View>
+
                     </View>
                   </View>
 
@@ -3522,7 +3353,7 @@ export default function App() {
                       <View style={styles.imageToolbar}>
                         <View style={styles.imageModeBar}>
                           <SegmentButton label="VLM" active={imageMode === 'vlm'} onPress={() => setImageMode('vlm')} />
-                          <SegmentButton label="OCR overlay" active={imageMode === 'ocr'} onPress={() => setImageMode('ocr')} />
+                          <SegmentButton label={settings.imageOCR.useGeneralAI || settings.imageOCR.provider === 'custom' ? 'OCR text' : 'OCR overlay'} active={imageMode === 'ocr'} onPress={() => setImageMode('ocr')} />
                         </View>
                         <IconButton
                           icon={ScanText}
@@ -3535,10 +3366,10 @@ export default function App() {
                     </>
                   )}
 
-                  <View style={styles.resultPanel}>
+                  <View style={[styles.resultPanel, isNarrowViewport && styles.resultPanelNarrow]}>
                     <View style={styles.panelHeader}>
                       <View style={styles.panelTitleRow}>
-                        <ResultIcon size={17} color={theme.secondaryAccent} />
+                        <ResultIcon size={16} color={theme.accentStrong} strokeWidth={1.8} />
                         <Text style={styles.panelTitle}>{textModeTitle(textMode)}</Text>
                       </View>
                       <Text style={styles.panelMeta}>{SUPPORTED_LANGUAGES[targetLang]}</Text>
@@ -3555,7 +3386,11 @@ export default function App() {
                         onPress={() => openSettingsAt(activeConfigGuidance.target)}
                       />
                     ) : (
-                      <Text style={styles.emptyText}>{textModeEmptyText(textMode)}</Text>
+                      <View style={[styles.resultEmpty, isNarrowViewport && styles.resultEmptyNarrow]}>
+                        <View style={styles.resultEmptyIcon}><Sparkles size={25} color={theme.accentStrong} strokeWidth={1.5} /></View>
+                        <Text style={styles.resultEmptyTitle}>{textMode === 'qa' ? 'A little local knowledge.' : textMode === 'explanation' ? 'Make sense of something new.' : 'Good conversations start here.'}</Text>
+                        <Text style={styles.emptyText}>{textModeEmptyText(textMode)}</Text>
+                      </View>
                     )}
                     {isFuriganaLoading && <Text style={styles.furiganaStatus}>Adding furigana...</Text>}
                     {!!targetText && (
@@ -3570,9 +3405,55 @@ export default function App() {
                       </View>
                     )}
                   </View>
+                  </View>
                 </ScrollView>
 
-                {notice && <Text style={styles.notice}>{notice}</Text>}
+                {notice && <Text accessibilityLiveRegion="polite" style={styles.notice}>{notice}</Text>}
+                <NativeMaterial theme={theme} style={styles.inputDock}>
+                      <View style={[styles.sourceToolbar]}>
+                        <View style={[styles.sourceToolbarGroup, isCompactViewport && styles.sourceToolbarGroupCompact]}>
+                          <IconButton
+                            icon={isVoiceRecording ? MicOff : Mic}
+                            label={isVoiceRecording ? 'Stop' : 'Speak'}
+                            onPress={isVoiceRecording ? handleStopRecording : handleStartRecording}
+                            disabled={busyState === 'translating' || busyState === 'image' || busyState === 'transcribing'}
+                            emphasized={isVoiceRecording}
+                            compact
+                            quiet
+                            compactSize={sourceToolbarButtonSize}
+                          />
+                          <IconButton
+                            icon={Camera}
+                            label="Camera"
+                            onPress={() => handlePickImage('camera')}
+                            disabled={isBusy(busyState)}
+                            compact
+                            quiet
+                            compactSize={sourceToolbarButtonSize}
+                          />
+                          <IconButton
+                            icon={ImageIcon}
+                            label="Album"
+                            onPress={() => handlePickImage('library')}
+                            disabled={isBusy(busyState)}
+                            compact
+                            quiet
+                            compactSize={sourceToolbarButtonSize}
+                          />
+                        </View>
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={textModeActionLabel(textMode)}
+                          onPress={() => { actionFeedback(); void handleRunTextMode(); }}
+                          disabled={!canRunTextMode || isBusy(busyState)}
+                          style={({ pressed }) => [styles.translateButton, (!canRunTextMode || isBusy(busyState)) && styles.translateButtonDisabled, pressed && styles.buttonPressed]}
+                        >
+                          <LinearGradient pointerEvents="none" colors={[theme.accent, '#4338ca']} style={styles.translateButtonFill} />
+                          <Text style={styles.translateButtonText}>{textModeActionLabel(textMode)}</Text>
+                          <ArrowRight size={17} color={theme.inverseText} strokeWidth={2} />
+                        </Pressable>
+                      </View>
+                </NativeMaterial>
               </View>
             </View>
 
@@ -3585,6 +3466,7 @@ export default function App() {
               </View>
             )}
         </SafeAreaView>
+          </KeyboardAvoidingView>
 
         <LanguagePicker
           visible={languagePickerTarget !== null}
@@ -3660,7 +3542,6 @@ export default function App() {
           onClose={() => setShowImageLightbox(false)}
         />
         </LinearGradient>
-      </SafeAreaProvider>
     </AppThemeContext.Provider>
   );
 }
@@ -3672,6 +3553,7 @@ function IconButton({
   disabled = false,
   emphasized = false,
   compact = false,
+  quiet = false,
   compactSize,
 }: {
   icon: React.ComponentType<{ size?: number; color?: string; strokeWidth?: number }>;
@@ -3680,27 +3562,29 @@ function IconButton({
   disabled?: boolean;
   emphasized?: boolean;
   compact?: boolean;
+  quiet?: boolean;
   compactSize?: number;
 }) {
   const { styles, theme } = useAppTheme();
-  const color = emphasized ? theme.inverseText : theme.accentStrong;
-  const iconSize = compact ? Math.max(16, (compactSize ?? 39) - 21) : 21;
+  const color = emphasized ? theme.inverseText : quiet ? theme.mutedText : theme.accentStrong;
+  const iconSize = compact ? 20 : 21;
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
-      onPress={onPress}
+      onPress={() => { selectionFeedback(); onPress(); }}
       disabled={disabled}
       hitSlop={compactSize ? Math.max(3, (44 - compactSize) / 2) : undefined}
       style={({ pressed }) => [
         compact ? styles.iconButtonCompact : styles.iconButton,
         compact && compactSize ? { width: compactSize, height: compactSize } : null,
+        quiet && styles.iconButtonQuiet,
         emphasized && styles.iconButtonEmphasized,
         disabled && styles.disabled,
         pressed && !disabled && styles.buttonPressed,
       ]}
     >
-      <Icon size={iconSize} color={disabled ? theme.disabledIcon : color} strokeWidth={2.4} />
+      <Icon size={iconSize} color={disabled ? theme.disabledIcon : color} strokeWidth={1.8} />
       {!compact && <Text style={[styles.iconButtonLabel, emphasized && styles.iconButtonLabelEmphasized]}>{label}</Text>}
     </Pressable>
   );
@@ -3735,17 +3619,18 @@ function ConfigGuidanceCard({
   );
 }
 
-function LanguageButton({ code, onPress }: { code: LanguageCode; onPress: () => void }) {
-  const { styles } = useAppTheme();
+function LanguageButton({ code, onPress, align = 'center' }: { code: LanguageCode; onPress: () => void; align?: 'center' | 'right' }) {
+  const { styles, theme } = useAppTheme();
   const label = `${SUPPORTED_LANGUAGES[code]} language`;
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
-      style={({ pressed }) => [styles.languageButton, pressed && styles.buttonPressed]}
-      onPress={onPress}
+      style={({ pressed }) => [styles.languageButton, align === 'right' && styles.languageButtonRight, pressed && styles.buttonPressed]}
+      onPress={() => { selectionFeedback(); onPress(); }}
     >
-      <Text style={styles.languageName}>{SUPPORTED_LANGUAGES[code]}</Text>
+      <Text numberOfLines={1} style={styles.languageName}>{SUPPORTED_LANGUAGES[code]}</Text>
+      <ChevronDown size={13} color={theme.subtleText} strokeWidth={1.8} />
     </Pressable>
   );
 }
@@ -3767,6 +3652,23 @@ function SegmentButton({ label, active, onPress }: { label: string; active: bool
 
 function TextModeSwitcher({ mode, onChange }: { mode: TextMode; onChange: (mode: TextMode) => void }) {
   const { styles, theme } = useAppTheme();
+  if (Platform.OS !== 'ios') return <PortableTextModeSwitcher mode={mode} onChange={onChange} />;
+  const modes: TextMode[] = ['translation', 'explanation', 'qa'];
+  return <SegmentedControl
+    accessibilityLabel="Assistant mode"
+    values={['Translate', 'Explain', 'Q&A']}
+    selectedIndex={modes.indexOf(mode)}
+    appearance={theme.name}
+    fontStyle={{ fontSize: 14, color: theme.mutedText, fontWeight: '500' }}
+    activeFontStyle={{ fontSize: 14, color: theme.accentStrong, fontWeight: '600' }}
+    style={styles.nativeModeControl}
+    onChange={(event) => { selectionFeedback(); onChange(modes[event.nativeEvent.selectedSegmentIndex]); }}
+  />;
+}
+
+function PortableTextModeSwitcher({ mode, onChange }: { mode: TextMode; onChange: (mode: TextMode) => void }) {
+  const { styles, theme } = useAppTheme();
+  const { reduceMotion } = useNativePreferences();
   const [trackWidth, setTrackWidth] = useState(0);
   const modeIndex = mode === 'translation' ? 0 : mode === 'explanation' ? 1 : 2;
   const indicatorPosition = useRef(new Animated.Value(modeIndex)).current;
@@ -3777,6 +3679,7 @@ function TextModeSwitcher({ mode, onChange }: { mode: TextMode; onChange: (mode:
   ];
 
   useEffect(() => {
+    if (reduceMotion) { indicatorPosition.setValue(modeIndex); return; }
     const animation = Animated.spring(indicatorPosition, {
       toValue: modeIndex,
       damping: 18,
@@ -3787,7 +3690,7 @@ function TextModeSwitcher({ mode, onChange }: { mode: TextMode; onChange: (mode:
     animation.start();
 
     return () => animation.stop();
-  }, [indicatorPosition, modeIndex]);
+  }, [indicatorPosition, modeIndex, reduceMotion]);
 
   const segmentWidth = Math.max(0, (trackWidth - 8) / options.length);
   const indicatorTranslateX = indicatorPosition.interpolate({
@@ -3827,7 +3730,7 @@ function TextModeSwitcher({ mode, onChange }: { mode: TextMode; onChange: (mode:
               pressed && styles.textModeButtonPressed,
             ]}
           >
-            <Icon size={15} color={active ? theme.inverseText : theme.accentStrong} strokeWidth={2.5} />
+            <Icon size={16} color={active ? theme.accentStrong : theme.mutedText} strokeWidth={1.8} />
             <Text style={[styles.textModeButtonText, active && styles.textModeButtonTextActive]}>{option.label}</Text>
           </Pressable>
         );
@@ -3836,7 +3739,34 @@ function TextModeSwitcher({ mode, onChange }: { mode: TextMode; onChange: (mode:
   );
 }
 
-function PopupPanel({
+type PopupPanelProps = {
+  visible: boolean;
+  onClose: () => void;
+  panelStyle: StyleProp<ViewStyle>;
+  baseBottomPadding?: number;
+  children: React.ReactNode;
+};
+
+function PopupPanel(props: PopupPanelProps) {
+  if (Platform.OS === 'ios') return <NativePopupPanel {...props} />;
+  return <AnimatedPopupPanel {...props} />;
+}
+
+function NativePopupPanel({ visible, onClose, panelStyle, children }: PopupPanelProps) {
+  const { styles, theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const { reduceMotion } = useNativePreferences();
+  return <Modal visible={visible} presentationStyle="pageSheet" animationType={reduceMotion ? 'none' : 'slide'} allowSwipeDismissal onRequestClose={onClose}>
+    <KeyboardAvoidingView behavior="padding" style={[styles.root, { backgroundColor: theme.field }]}>
+      <View accessibilityElementsHidden style={styles.sheetGrabber} />
+      <View accessibilityViewIsModal style={[panelStyle, styles.nativeSheetContent, { paddingBottom: Math.max(12, insets.bottom) }]}>
+        {children}
+      </View>
+    </KeyboardAvoidingView>
+  </Modal>;
+}
+
+function AnimatedPopupPanel({
   visible,
   onClose,
   panelStyle,
@@ -3850,6 +3780,7 @@ function PopupPanel({
   children: React.ReactNode;
 }) {
   const { styles } = useAppTheme();
+  const { reduceMotion } = useNativePreferences();
   const insets = useSafeAreaInsets();
   const sheetOffscreenY = useRef(Math.max(480, Dimensions.get('screen').height)).current;
   const [rendered, setRendered] = useState(visible);
@@ -3878,13 +3809,13 @@ function PopupPanel({
         animation = Animated.parallel([
           Animated.timing(backdropOpacity, {
             toValue: 1,
-            duration: 180,
+            duration: reduceMotion ? 0 : 180,
             easing: Easing.out(Easing.quad),
             useNativeDriver: Platform.OS !== 'web',
           }),
           Animated.timing(sheetTranslateY, {
             toValue: 0,
-            duration: 320,
+            duration: reduceMotion ? 0 : 320,
             easing: Easing.out(Easing.cubic),
             useNativeDriver: Platform.OS !== 'web',
           }),
@@ -3895,13 +3826,13 @@ function PopupPanel({
       animation = Animated.parallel([
         Animated.timing(backdropOpacity, {
           toValue: 0,
-          duration: 240,
+          duration: reduceMotion ? 0 : 240,
           easing: Easing.in(Easing.quad),
           useNativeDriver: Platform.OS !== 'web',
         }),
         Animated.timing(sheetTranslateY, {
           toValue: sheetOffscreenY,
-          duration: 280,
+          duration: reduceMotion ? 0 : 280,
           easing: Easing.in(Easing.cubic),
           useNativeDriver: Platform.OS !== 'web',
         }),
@@ -3920,7 +3851,7 @@ function PopupPanel({
       }
       animation?.stop();
     };
-  }, [backdropOpacity, sheetOffscreenY, sheetTranslateY, visible]);
+  }, [backdropOpacity, sheetOffscreenY, sheetTranslateY, visible, reduceMotion]);
 
   if (!rendered) {
     return null;
@@ -3964,12 +3895,14 @@ function LanguagePicker({
   onSelect: (code: LanguageCode) => void;
   onClose: () => void;
 }) {
-  const { styles } = useAppTheme();
+  const { styles, theme } = useAppTheme();
   const [displayedSelected, setDisplayedSelected] = useState(selected);
+  const [query, setQuery] = useState('');
 
   useEffect(() => {
     if (visible) {
       setDisplayedSelected(selected);
+      setQuery('');
     }
   }, [selected, visible]);
 
@@ -3984,13 +3917,16 @@ function LanguagePicker({
         <Text style={styles.sheetTitle}>Choose language</Text>
         <IconButton icon={X} label="Close" onPress={onClose} compact />
       </View>
-      <ScrollView style={styles.languageList}>
-        {LANGUAGE_OPTIONS.map((language) => (
+      <TextInput accessibilityLabel="Search languages" placeholder="Search languages" placeholderTextColor={theme.mutedText} value={query} onChangeText={setQuery} clearButtonMode="while-editing" autoCorrect={false} style={styles.languageSearch} />
+      <ScrollView style={styles.languageList} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+        {LANGUAGE_OPTIONS.filter((language) => `${language.name} ${language.code}`.toLowerCase().includes(query.trim().toLowerCase())).map((language) => (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={language.name}
+            accessibilityState={{ selected: displayedSelected === language.code }}
             key={language.code}
             onPress={() => {
+              selectionFeedback();
               setDisplayedSelected(language.code);
               onSelect(language.code);
             }}
@@ -4001,8 +3937,10 @@ function LanguagePicker({
             ]}
           >
             <Text style={styles.languageRowName}>{language.name}</Text>
+            {displayedSelected === language.code && <Check size={19} color={theme.accentStrong} />}
           </Pressable>
         ))}
+        {!LANGUAGE_OPTIONS.some((language) => `${language.name} ${language.code}`.toLowerCase().includes(query.trim().toLowerCase())) && <Text style={styles.settingsHelp}>No matching languages.</Text>}
       </ScrollView>
     </PopupPanel>
   );
@@ -4054,17 +3992,13 @@ function SetupWizard({
     setDraft((current) => ({ ...current, speechRecognition: { ...current.speechRecognition, ...patch } }));
   };
 
-  const updateOCR = (patch: Partial<ImageOCRSettings>) => {
-    setDraft((current) => ({ ...current, imageOCR: { ...current.imageOCR, ...patch } }));
-  };
-
   const updateVLM = (patch: Partial<AISettings['vlm']>) => {
     setDraft((current) => ({ ...current, vlm: { ...current.vlm, ...patch } }));
   };
 
   const canContinueTranslation = configMode === 'general'
-    ? Boolean(draft.generalAI.apiKey && draft.generalAI.endpoint && draft.generalAI.modelName)
-    : Boolean(draft.apiKey && draft.endpoint && draft.modelName);
+    ? Boolean(hasProviderConnection(draft.generalAI))
+    : Boolean(hasProviderConnection(draft));
 
   const completeWithDraft = async () => {
     await onComplete(normalizeSettings(draft));
@@ -4144,9 +4078,8 @@ function SetupWizard({
   const stepIndex = step === 'translation' ? 1 : step === 'speech' ? 2 : step === 'image' ? 3 : 0;
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onSkip}>
-      <View style={styles.modalBackdrop}>
-        <View style={styles.setupSheet}>
+    <>
+    <PopupPanel visible={visible} onClose={onSkip} panelStyle={styles.setupSheet}>
           <View style={styles.sheetHeader}>
             <View style={styles.sheetHeaderText}>
               <Text style={styles.sheetTitle}>Set up tabitomo</Text>
@@ -4155,6 +4088,7 @@ function SetupWizard({
             <IconButton icon={X} label="Skip" onPress={onSkip} compact />
           </View>
 
+          {step === 'translation' && canContinueTranslation && <Pressable accessibilityRole="button" onPress={completeWithDraft} style={({ pressed }) => [styles.wizardButtonPrimary, { marginHorizontal: 16, marginBottom: 8 }, pressed && styles.buttonPressed]}><Text style={styles.wizardButtonPrimaryText}>Start translating</Text></Pressable>}
           {step !== 'choice' && step !== 'import' && (
             <View style={styles.wizardStepRow}>
               {[1, 2, 3].map((index) => (
@@ -4208,6 +4142,7 @@ function SetupWizard({
                 />
                 {configMode === 'general' ? (
                   <>
+                    {visible && <AIConnection theme={theme} value={draft.generalAI} onChange={(generalAI) => setDraft((current) => ({ ...current, generalAI }))} />}
                     <ChoiceRow
                       options={API_FORMAT_OPTIONS.map((option) => option.value)}
                       labels={API_FORMAT_OPTIONS.reduce<Record<string, string>>((labels, option) => {
@@ -4218,7 +4153,7 @@ function SetupWizard({
                       onChange={(value) => updateGeneralAI({ apiFormat: value as APIFormat })}
                     />
                     <Field label="Endpoint" value={draft.generalAI.endpoint} onChangeText={(endpoint) => updateGeneralAI({ endpoint })} placeholder="https://api.openai.com/v1" />
-                    <Field label="Model" value={draft.generalAI.modelName} onChangeText={(modelName) => updateGeneralAI({ modelName })} placeholder="gpt-5.6-terra" />
+                    <Field label="Model" value={draft.generalAI.modelName} onChangeText={(modelName) => updateGeneralAI({ modelName })} placeholder="Model ID" />
                     <Field label="API key" value={draft.generalAI.apiKey} onChangeText={(apiKey) => updateGeneralAI({ apiKey })} secureTextEntry placeholder="sk-..." />
                   </>
                 ) : (
@@ -4254,24 +4189,8 @@ function SetupWizard({
 
             {step === 'image' && (
               <>
-                <SettingsSection title="Image OCR" help="Cloud OCR currently supports only Alibaba Cloud Model Studio Qwen-OCR. It uses the native advanced recognition task to return line text and absolute coordinates for translated overlays; normal OpenAI-compatible VLM endpoints are not adapted OCR APIs.">
-                  {(draft.imageOCR.provider === 'custom' || draft.imageOCR.useGeneralAI) && <Text style={styles.settingsHelp}>This imported legacy OCR provider is not adapted for coordinate OCR. Choose Local PP-OCR or Alibaba Qwen-OCR.</Text>}
-                  <ChoiceRow
-                    options={['local', 'qwen']}
-                    labels={{ local: 'Local PP-OCR', qwen: 'Alibaba Qwen-OCR' }}
-                    value={draft.imageOCR.provider === 'local-ppocr' ? 'local' : 'qwen'}
-                    onChange={(mode) => updateOCR(mode === 'local'
-                      ? { useGeneralAI: false, provider: 'local-ppocr' }
-                      : { useGeneralAI: false, provider: 'qwen', endpoint: draft.imageOCR.endpoint.includes('aliyuncs.com') ? draft.imageOCR.endpoint : DASHSCOPE_OCR_INTL_ENDPOINT, modelName: draft.imageOCR.modelName || 'qwen3.5-ocr' })}
-                  />
-                  {draft.imageOCR.provider !== 'local-ppocr' && !draft.imageOCR.useGeneralAI && (
-                    <>
-                      <ChoiceRow options={['beijing', 'singapore']} labels={{ beijing: 'Beijing', singapore: 'Singapore' }} value={draft.imageOCR.endpoint === DASHSCOPE_OCR_ENDPOINT ? 'beijing' : 'singapore'} onChange={(region) => updateOCR({ provider: 'qwen', endpoint: region === 'beijing' ? DASHSCOPE_OCR_ENDPOINT : DASHSCOPE_OCR_INTL_ENDPOINT })} />
-                      <ChoiceRow options={['qwen3.5-ocr', 'qwen-vl-ocr-latest']} labels={{ 'qwen3.5-ocr': 'qwen3.5-ocr · Recommended', 'qwen-vl-ocr-latest': 'Legacy compatibility' }} value={draft.imageOCR.modelName || 'qwen3.5-ocr'} onChange={(modelName) => updateOCR({ provider: 'qwen', modelName })} />
-                      <Field label="Alibaba OCR endpoint" value={draft.imageOCR.endpoint} onChangeText={(endpoint) => updateOCR({ provider: 'qwen', endpoint })} placeholder={DASHSCOPE_OCR_INTL_ENDPOINT} />
-                      <Field label="Alibaba Model Studio API key" value={draft.imageOCR.apiKey} onChangeText={(apiKey) => updateOCR({ provider: 'qwen', apiKey })} secureTextEntry placeholder="DashScope API key" />
-                    </>
-                  )}
+                <SettingsSection title="Image OCR" help={OCR_HELP}>
+                  <OCRFields settings={draft} onChange={setDraft} />
                 </SettingsSection>
 
                 <SettingsSection title="VLM image translation">
@@ -4288,12 +4207,12 @@ function SetupWizard({
                   {!draft.vlm.useGeneralAI && !draft.vlm.useCustom && (
                     <Text style={styles.settingsHelp}>{draft.imageOCR.provider === 'local-ppocr'
                       ? 'Local PP-OCR is an OCR overlay pipeline, not a direct VLM. Choose General AI or Custom for direct image translation.'
-                      : 'Uses the Alibaba credentials and region above with qwen-vl-max-latest. The selected Qwen-OCR model remains dedicated to coordinate extraction.'}</Text>
+                      : 'Reuses your OCR vision model. The legacy Qwen adapter uses its corresponding vision endpoint.'}</Text>
                   )}
                   {draft.vlm.useCustom && (
                     <>
                       <Field label="VLM endpoint" value={draft.vlm.endpoint || ''} onChangeText={(endpoint) => updateVLM({ endpoint })} placeholder="https://api.example.com/v1" />
-                      <Field label="VLM model" value={draft.vlm.modelName || ''} onChangeText={(modelName) => updateVLM({ modelName })} placeholder="qwen-vl-max / gpt-4o" />
+                      <Field label="VLM model" value={draft.vlm.modelName || ''} onChangeText={(modelName) => updateVLM({ modelName })} placeholder="Vision model ID" />
                       <Field label="VLM API key" value={draft.vlm.apiKey || ''} onChangeText={(apiKey) => updateVLM({ apiKey })} secureTextEntry placeholder="Optional custom VLM key" />
                     </>
                   )}
@@ -4370,15 +4289,14 @@ function SetupWizard({
               </Pressable>
             </View>
           )}
-        </View>
-      </View>
+    </PopupPanel>
 
       <QRScannerSheet
         visible={showQrScanner}
         onClose={() => setShowQrScanner(false)}
         onScanned={handleScannedConfig}
       />
-    </Modal>
+    </>
   );
 }
 
@@ -4861,10 +4779,6 @@ function SettingsSheet({
     setDraft((current) => ({ ...current, speechRecognition: { ...current.speechRecognition, ...patch } }));
   };
 
-  const updateOCR = (patch: Partial<ImageOCRSettings>) => {
-    setDraft((current) => ({ ...current, imageOCR: { ...current.imageOCR, ...patch } }));
-  };
-
   const updateVLM = (patch: Partial<AISettings['vlm']>) => {
     setDraft((current) => ({ ...current, vlm: { ...current.vlm, ...patch } }));
   };
@@ -5111,19 +5025,19 @@ function SettingsSheet({
     if (Platform.OS !== 'ios') {
       return 'Local OCR validation requires an iOS native build.';
     }
-    const pack = getReadyInstalledModelPackById(installedModelPacks, 'ppocr-v5-mobile');
+    const pack = getReadyInstalledModelPackById(installedModelPacks, 'ppocr-v6-small');
     if (pack) {
-      const validation = await validateNativeLocalModelPackAsync('ppocr-v5-mobile', pack.rootUri);
-      return `${pack.label || 'PP-OCR v5 Mobile'} ${pack.version} loaded with ${validation.runtime}.`;
+      const validation = await validateNativeLocalModelPackAsync('ppocr-v6-small', pack.rootUri);
+      return `${pack.label || 'PP-OCR v6 Small'} ${pack.version} loaded with ${validation.runtime}.`;
     }
     const visionAvailable = await isNativeVisionAvailableAsync();
     const languages = nativeVisionOCRLanguages(sourceLang);
     if (!visionAvailable) {
-      return 'PP-OCR v5 Mobile is not ready, and Apple Vision OCR is unavailable in this build.';
+      return 'PP-OCR v6 Small is not ready, and Apple Vision OCR is unavailable in this build.';
     }
     return languages.length
-      ? `PP-OCR v5 Mobile is not ready. Apple Vision fallback is available for ${languages.join(', ')}.`
-      : 'PP-OCR v5 Mobile is not ready. Apple Vision fallback will use language auto-detection.';
+      ? `PP-OCR v6 Small is not ready. Apple Vision fallback is available for ${languages.join(', ')}.`
+      : 'PP-OCR v6 Small is not ready. Apple Vision fallback will use language auto-detection.';
   };
 
   const handleDeleteModelPack = async (pack: InstalledModelPack) => {
@@ -5247,7 +5161,7 @@ function SettingsSheet({
   ), [draft.speechRecognition.localEngine, installedModelPacks, modelPackRuntimeEnvironment]);
   const ocrModelPackActivation = useMemo(() => (
     selectModelPackActivation(
-      installedModelPacks.filter((pack) => pack.id === 'ppocr-v5-mobile'),
+      installedModelPacks.filter((pack) => pack.id === 'ppocr-v6-small'),
       modelPackRuntimeEnvironment,
       'ocr',
       getNativeBaselineModelPackRuntime('ocr')
@@ -5261,8 +5175,8 @@ function SettingsSheet({
     getOfflineModelDefinition(selectedWhisperModelId),
     getOfflineModelDefinition('sensevoice-small'),
   ];
-  const ppocrOfflineModel = getOfflineModelDefinition('ppocr-v5-mobile');
-  const translationModelForOutputMode = draft.apiKey && draft.endpoint && draft.modelName
+  const ppocrOfflineModel = getOfflineModelDefinition('ppocr-v6-small');
+  const translationModelForOutputMode = hasProviderConnection(draft)
     ? draft.modelName
     : draft.generalAI.modelName;
   const isHunyuanTranslationModel = isHunyuanMTModel(translationModelForOutputMode);
@@ -5273,7 +5187,7 @@ function SettingsSheet({
     }
 
     setDraft((current) => {
-      const currentModel = current.apiKey && current.endpoint && current.modelName
+      const currentModel = hasProviderConnection(current)
         ? current.modelName
         : current.generalAI.modelName;
       if (!isHunyuanMTModel(currentModel) || current.translation.outputMode === 'plain') {
@@ -5627,7 +5541,7 @@ function SettingsSheet({
                 <RuntimeCheckButton
                   icon={ScanText}
                   label="Check local OCR"
-                  detail="Loads PP-OCR v5 Mobile, or reports the Apple Vision fallback."
+                  detail="Loads PP-OCR v6 Small, or reports the Apple Vision fallback."
                   running={false}
                   disabled={false}
                   onPress={() => runLocalRuntimeCheck('ocr', checkLocalOCRRuntime)}
@@ -5650,8 +5564,9 @@ function SettingsSheet({
               <>
             <SettingsSection
               title="General AI"
-              help="General AI powers explanations, Quick Q&A, and any feature set to use General AI. Enter an OpenAI-compatible endpoint, a model name, and the API key issued by that provider. The API format must match the endpoint."
+              help="Connect your account or use any compatible provider. The API format must match the endpoint. Choose an image-capable model for direct photo translation."
             >
+              {visible && <AIConnection theme={theme} value={draft.generalAI} onChange={(generalAI) => setDraft((current) => ({ ...current, generalAI }))} />}
               <ChoiceRow
                 options={API_FORMAT_OPTIONS.map((option) => option.value)}
                 labels={API_FORMAT_OPTIONS.reduce<Record<string, string>>((labels, option) => {
@@ -5662,7 +5577,7 @@ function SettingsSheet({
                 onChange={(value) => updateGeneralAI({ apiFormat: value as APIFormat })}
               />
               <Field label="Endpoint" value={draft.generalAI.endpoint} onChangeText={(endpoint) => updateGeneralAI({ endpoint })} placeholder="https://api.openai.com/v1" />
-              <Field label="Model" value={draft.generalAI.modelName} onChangeText={(modelName) => updateGeneralAI({ modelName })} placeholder="gpt-5.6-terra" />
+              <Field label="Model" value={draft.generalAI.modelName} onChangeText={(modelName) => updateGeneralAI({ modelName })} placeholder="Model ID" />
               <Field label="API key" value={draft.generalAI.apiKey} onChangeText={(apiKey) => updateGeneralAI({ apiKey })} secureTextEntry placeholder="sk-..." />
             </SettingsSection>
 
@@ -5781,24 +5696,13 @@ function SettingsSheet({
             )}
 
             {activeSettingsCategory === 'image' && (
-            <SettingsSection
-              title="Image OCR"
-              help="OCR extracts text and positions before translation. Local uses PP-OCR v5 with Apple Vision fallback. Cloud OCR currently supports only Alibaba Cloud Model Studio Qwen-OCR and uses advanced recognition to return line-level absolute coordinates. General AI and arbitrary OpenAI-compatible VLM endpoints are not adapted coordinate OCR APIs."
-            >
-              {(draft.imageOCR.provider === 'custom' || draft.imageOCR.useGeneralAI) && <Text style={styles.settingsHelp}>This imported legacy OCR provider is not adapted for coordinate OCR. Choose Local PP-OCR or Alibaba Qwen-OCR.</Text>}
-              <ChoiceRow
-                options={['local', 'qwen']}
-                labels={{ local: 'Local PP-OCR', qwen: 'Alibaba Qwen-OCR' }}
-                value={draft.imageOCR.provider === 'local-ppocr' ? 'local' : 'qwen'}
-                onChange={(mode) => updateOCR(mode === 'local'
-                  ? { useGeneralAI: false, provider: 'local-ppocr' }
-                  : { useGeneralAI: false, provider: 'qwen', endpoint: draft.imageOCR.endpoint.includes('aliyuncs.com') ? draft.imageOCR.endpoint : DASHSCOPE_OCR_INTL_ENDPOINT, modelName: draft.imageOCR.modelName || 'qwen3.5-ocr' })}
-              />
+            <SettingsSection title="Image OCR" help={OCR_HELP}>
+              <OCRFields settings={draft} onChange={setDraft} />
               {draft.imageOCR.provider === 'local-ppocr' && !draft.imageOCR.useGeneralAI && (() => {
                 const installed = installedModelPacks.find((pack) => pack.id === ppocrOfflineModel.packId);
                 return (
                   <>
-                    <Text style={styles.settingsHelp}>Download and verify PP-OCR v5 on this device. Once ready, PP-OCR handles image text locally; Apple Vision is used only when the model is missing or cannot run.</Text>
+                    <Text style={styles.settingsHelp}>Download and verify PP-OCR v6 Small on this device. Once ready, PP-OCR handles image text locally; Apple Vision is used only when the model is missing or cannot run.</Text>
                     <OfflineModelRow
                       model={ppocrOfflineModel}
                       installed={installed}
@@ -5810,15 +5714,6 @@ function SettingsSheet({
                   </>
                 );
               })()}
-              {draft.imageOCR.provider !== 'local-ppocr' && !draft.imageOCR.useGeneralAI && (
-                <>
-                  <ChoiceRow options={['beijing', 'singapore']} labels={{ beijing: 'Beijing', singapore: 'Singapore' }} value={draft.imageOCR.endpoint === DASHSCOPE_OCR_ENDPOINT ? 'beijing' : 'singapore'} onChange={(region) => updateOCR({ provider: 'qwen', endpoint: region === 'beijing' ? DASHSCOPE_OCR_ENDPOINT : DASHSCOPE_OCR_INTL_ENDPOINT })} />
-                  <ChoiceRow options={['qwen3.5-ocr', 'qwen-vl-ocr-latest']} labels={{ 'qwen3.5-ocr': 'qwen3.5-ocr · Recommended', 'qwen-vl-ocr-latest': 'Legacy compatibility' }} value={draft.imageOCR.modelName || 'qwen3.5-ocr'} onChange={(modelName) => updateOCR({ provider: 'qwen', modelName })} />
-                  <Field label="Alibaba OCR endpoint" value={draft.imageOCR.endpoint} onChangeText={(endpoint) => updateOCR({ provider: 'qwen', endpoint })} placeholder={DASHSCOPE_OCR_INTL_ENDPOINT} />
-                  <Field label="Alibaba Model Studio API key" value={draft.imageOCR.apiKey} onChangeText={(apiKey) => updateOCR({ provider: 'qwen', apiKey })} secureTextEntry placeholder="DashScope API key" />
-                  <Text style={styles.settingsHelp}>qwen3.5-ocr is the recommended model. The compatibility model remains available for accounts or regions that have not enabled the newer model.</Text>
-                </>
-              )}
             </SettingsSection>
             )}
 
@@ -5894,7 +5789,7 @@ function SettingsSheet({
             {activeSettingsCategory === 'image' && (
             <SettingsSection
               title="VLM image translation"
-              help="A VLM translates an image directly. General AI reuses the main model. OCR settings reuse Alibaba credentials and region with qwen-vl-max-latest; the Qwen-OCR model itself remains dedicated to coordinate OCR. Custom uses a dedicated vision model."
+              help="A VLM translates an image directly. General AI reuses the main model. OCR settings reuse your configured vision model. The legacy Qwen adapter uses its corresponding vision endpoint. Custom uses a dedicated vision model."
             >
               <ChoiceRow
                 options={['general', 'ocr', 'custom']}
@@ -5909,42 +5804,14 @@ function SettingsSheet({
               {!draft.vlm.useGeneralAI && !draft.vlm.useCustom && (
                 <View style={styles.linkedSettingsPanel}>
                   <Text style={styles.linkedSettingsTitle}>OCR settings used by VLM</Text>
-                  <ChoiceRow
-                    options={['local', 'qwen']}
-                    labels={{ local: 'Local PP-OCR', qwen: 'Alibaba Qwen-OCR' }}
-                    value={draft.imageOCR.provider === 'local-ppocr' ? 'local' : 'qwen'}
-                    onChange={(mode) => updateOCR(mode === 'local'
-                      ? { useGeneralAI: false, provider: 'local-ppocr', localModel: 'ppocr-v5-mobile' }
-                      : { useGeneralAI: false, provider: 'qwen', endpoint: draft.imageOCR.endpoint.includes('aliyuncs.com') ? draft.imageOCR.endpoint : DASHSCOPE_OCR_INTL_ENDPOINT, modelName: draft.imageOCR.modelName || 'qwen3.5-ocr' })}
-                  />
-                  {draft.imageOCR.provider === 'local-ppocr' && !draft.imageOCR.useGeneralAI && (() => {
-                    const installed = installedModelPacks.find((pack) => pack.id === ppocrOfflineModel.packId);
-                    return (
-                      <OfflineModelRow
-                        model={ppocrOfflineModel}
-                        installed={installed}
-                        busy={modelPackBusyKey === ppocrOfflineModel.id}
-                        disabled={modelPackBusyKey !== null && modelPackBusyKey !== ppocrOfflineModel.id}
-                        onDownload={() => handleInstallOfflineModel(ppocrOfflineModel.id)}
-                        onDelete={() => installed && handleDeleteModelPack(installed)}
-                      />
-                    );
-                  })()}
-                  {draft.imageOCR.provider !== 'local-ppocr' && !draft.imageOCR.useGeneralAI && (
-                    <>
-                      <Text style={styles.settingsHelp}>Direct VLM translation uses qwen-vl-max-latest with the Alibaba credentials below. Coordinate OCR uses the selected Qwen-OCR model.</Text>
-                      <ChoiceRow options={['qwen3.5-ocr', 'qwen-vl-ocr-latest']} labels={{ 'qwen3.5-ocr': 'qwen3.5-ocr · Recommended', 'qwen-vl-ocr-latest': 'Legacy compatibility' }} value={draft.imageOCR.modelName || 'qwen3.5-ocr'} onChange={(modelName) => updateOCR({ provider: 'qwen', modelName })} />
-                      <Field label="Alibaba OCR endpoint" value={draft.imageOCR.endpoint} onChangeText={(endpoint) => updateOCR({ provider: 'qwen', endpoint })} placeholder={DASHSCOPE_OCR_INTL_ENDPOINT} />
-                      <Field label="Alibaba Model Studio API key" value={draft.imageOCR.apiKey} onChangeText={(apiKey) => updateOCR({ provider: 'qwen', apiKey })} secureTextEntry placeholder="DashScope API key" />
-                    </>
-                  )}
-                  {draft.imageOCR.provider === 'local-ppocr' && <Text style={styles.settingsHelp}>Local PP-OCR is an OCR overlay pipeline, not a direct VLM. Choose General AI or Custom for direct VLM translation.</Text>}
+                  <Text style={styles.settingsHelp}>Custom vision reuses the OCR model. Qwen coordinate OCR uses its companion vision model. For Local OCR, choose General AI or Custom for direct vision translation.</Text>
+                  <OCRFields settings={draft} onChange={setDraft} />
                 </View>
               )}
               {draft.vlm.useCustom && (
                 <>
                   <Field label="VLM endpoint" value={draft.vlm.endpoint || ''} onChangeText={(endpoint) => updateVLM({ endpoint })} placeholder="Optional custom VLM endpoint" />
-                  <Field label="VLM model" value={draft.vlm.modelName || ''} onChangeText={(modelName) => updateVLM({ modelName })} placeholder="gpt-4o / qwen-vl-max" />
+                  <Field label="VLM model" value={draft.vlm.modelName || ''} onChangeText={(modelName) => updateVLM({ modelName })} placeholder="Vision model ID" />
                   <Field label="VLM API key" value={draft.vlm.apiKey || ''} onChangeText={(apiKey) => updateVLM({ apiKey })} secureTextEntry placeholder="Optional custom VLM key" />
                 </>
               )}
@@ -6282,7 +6149,7 @@ function DeviceQASheet({
 
   const runTextProviderCheck = async () => {
     const hasTranslationProvider = Boolean(
-      settings.apiKey && settings.endpoint && settings.modelName
+      hasProviderConnection(settings)
     ) || hasGeneralAISettings(settings);
     const hasGeneralProvider = hasGeneralAISettings(settings);
 
@@ -6341,13 +6208,13 @@ function DeviceQASheet({
       return hasGeneralAISettings(settings);
     }
     if (settings.vlm.useCustom) {
-      return Boolean(settings.vlm.apiKey && settings.vlm.endpoint && settings.vlm.modelName);
+      return Boolean(hasProviderConnection(settings.vlm));
     }
     if (settings.imageOCR.useGeneralAI) {
       return hasGeneralAISettings(settings);
     }
     return settings.imageOCR.provider !== 'local-ppocr'
-      && Boolean(settings.imageOCR.apiKey && settings.imageOCR.endpoint);
+      && Boolean(hasProviderConnection(settings.imageOCR));
   };
 
   const hasCloudOCRProvider = () => {
@@ -6355,12 +6222,12 @@ function DeviceQASheet({
       return hasGeneralAISettings(settings);
     }
     return settings.imageOCR.provider !== 'local-ppocr'
-      && Boolean(settings.imageOCR.apiKey && settings.imageOCR.endpoint);
+      && Boolean(hasProviderConnection(settings.imageOCR));
   };
 
   const runImageProviderCheck = async () => {
     const hasTranslationProvider = Boolean(
-      settings.apiKey && settings.endpoint && settings.modelName
+      hasProviderConnection(settings)
     ) || hasGeneralAISettings(settings);
 
     if (!hasVLMProvider()) {
@@ -6490,14 +6357,14 @@ function DeviceQASheet({
       throw new Error('Capture or import a device image before running PP-OCR.');
     }
     const installed = await loadInstalledModelPacks();
-    const pack = getReadyInstalledModelPackById(installed, 'ppocr-v5-mobile');
+    const pack = getReadyInstalledModelPackById(installed, 'ppocr-v6-small');
     if (!pack) {
-      throw new Error('Download PP-OCR v5 Mobile before running this check.');
+      throw new Error('Download PP-OCR v6 Small before running this check.');
     }
 
-    await validateNativeLocalModelPackAsync('ppocr-v5-mobile', pack.rootUri);
-    const result = await recognizeTextWithNativePPOCRAsync(currentImageUri, pack.rootUri);
-    return `ppocr-v5-mobile inference completed with ${result.runtime}; lines=${result.items.length}; native=${result.durationMs} ms.`;
+    await validateNativeLocalModelPackAsync('ppocr-v6-small', pack.rootUri);
+    const result = await recognizeTextWithNativePPOCRAsync(currentImageUri, 'ppocr-v6-small', pack.rootUri);
+    return `ppocr-v6-small inference completed with ${result.runtime}; lines=${result.items.length}; native=${result.durationMs} ms.`;
   };
 
   const prepareImageFromPicker = async (source: 'camera' | 'library') => {
@@ -7373,6 +7240,17 @@ function SettingsCategoryBar({
 }) {
   const { styles, theme } = useAppTheme();
 
+  if (Platform.OS === 'ios') return <SegmentedControl
+    accessibilityLabel="Settings category"
+    values={SETTINGS_CATEGORY_ITEMS.map((item) => item.label)}
+    selectedIndex={SETTINGS_CATEGORY_ITEMS.findIndex((item) => item.id === active)}
+    appearance={theme.name}
+    fontStyle={{ fontSize: 12, color: theme.mutedText, fontWeight: '500' }}
+    activeFontStyle={{ fontSize: 12, color: theme.accentStrong, fontWeight: '600' }}
+    style={styles.nativeCategoryControl}
+    onChange={(event) => { selectionFeedback(); onChange(SETTINGS_CATEGORY_ITEMS[event.nativeEvent.selectedSegmentIndex].id); }}
+  />;
+
   return (
     <View accessibilityRole="tablist" style={styles.settingsCategoryBar}>
         {SETTINGS_CATEGORY_ITEMS.map((item) => {
@@ -7438,9 +7316,28 @@ function SettingsSection({
           </Pressable>
         )}
       </View>
-      {children}
+      <View style={styles.settingsGroup}>{children}</View>
     </View>
   );
+}
+
+function OCRFields({ settings, onChange }: { settings: AISettings; onChange: (settings: AISettings) => void }) {
+  const { styles } = useAppTheme();
+  const ocr = settings.imageOCR;
+  const mode = getOCRMode(ocr);
+  const update = (patch: Partial<ImageOCRSettings>) => onChange({ ...settings, imageOCR: { ...ocr, ...patch } });
+  return <>
+    <ChoiceRow options={['local', 'general', 'custom', 'qwen']} labels={{ local: 'Local PP-OCR', general: 'General AI OCR', custom: 'Custom vision', qwen: 'Alibaba Qwen-OCR' }} value={mode} onChange={(value) => onChange({ ...settings, imageOCR: selectOCRMode(settings, value) })} />
+    {mode === 'local' && <Text style={styles.settingsHelp}>{LOCAL_MODEL_GUIDANCE.ocr}</Text>}
+    {mode === 'general' && <Text style={styles.settingsHelp}>Uses an image-capable General AI model. Extracted text appears without coordinate overlays.</Text>}
+    {(mode === 'custom' || mode === 'qwen') && <>
+      {mode === 'qwen' && <ChoiceRow options={['beijing', 'singapore']} labels={{ beijing: 'Beijing', singapore: 'Singapore' }} value={ocr.endpoint === DASHSCOPE_OCR_ENDPOINT ? 'beijing' : 'singapore'} onChange={(region) => update({ endpoint: region === 'beijing' ? DASHSCOPE_OCR_ENDPOINT : DASHSCOPE_OCR_INTL_ENDPOINT, apiKey: '' })} />}
+      {mode === 'custom' && <Text style={styles.settingsHelp}>Use any vision-capable OpenAI-compatible model. Text is extracted without coordinate overlays.</Text>}
+      <Field label={mode === 'qwen' ? 'Alibaba OCR endpoint' : 'Custom OCR endpoint'} value={ocr.endpoint} onChangeText={(endpoint) => update({ endpoint })} placeholder={mode === 'qwen' ? DASHSCOPE_OCR_INTL_ENDPOINT : 'https://api.example.com/v1'} />
+      <Field label="OCR model" value={ocr.modelName || ''} onChangeText={(modelName) => update({ modelName })} placeholder={mode === 'qwen' ? 'qwen3.5-ocr' : 'Vision model ID'} />
+      <Field label={mode === 'qwen' ? 'Alibaba Model Studio API key' : 'OCR API key'} value={ocr.apiKey} onChangeText={(apiKey) => update({ apiKey })} secureTextEntry placeholder={mode === 'qwen' ? 'DashScope API key' : 'Optional for local servers'} />
+    </>}
+  </>;
 }
 
 function Field({
@@ -7467,6 +7364,7 @@ function Field({
       {secureTextEntry ? (
         <View style={styles.secureFieldInputWrap}>
           <TextInput
+            accessibilityLabel={label}
             value={value}
             onChangeText={onChangeText}
             placeholder={placeholder}
@@ -7488,6 +7386,7 @@ function Field({
         </View>
       ) : (
         <TextInput
+          accessibilityLabel={label}
           value={value}
           onChangeText={onChangeText}
           placeholder={placeholder}
@@ -7575,21 +7474,30 @@ function SettingToggle({
 
 function createStyles(theme: AppTheme) {
   return StyleSheet.create({
+  headerSettingsMaterial: { width: 48, height: 48, borderRadius: 24 },
+  headerEditing: { minHeight: 56, paddingTop: 0, paddingBottom: 4 },
+  brandEditing: { fontSize: 22, letterSpacing: -0.6 },
+  brandIconEditing: { width: 32, height: 32 },
+  nativeModeControl: { height: 40, marginBottom: 16 },
+  nativeCategoryControl: { height: 36, marginBottom: 10 },
+  translationSheet: { borderRadius: 30, borderCurve: 'continuous', backgroundColor: theme.panel, borderWidth: StyleSheet.hairlineWidth, borderColor: theme.name === 'dark' ? theme.border : '#ffffff', shadowColor: theme.shadow, shadowOpacity: theme.name === 'dark' ? 0.2 : 0.1, shadowRadius: 18, shadowOffset: { width: 0, height: 9 } },
+  inputDock: { marginTop: 14, borderRadius: 32, shadowColor: theme.shadow, shadowOpacity: 0.14, shadowRadius: 16, shadowOffset: { width: 0, height: 8 } },
+  translateButtonFill: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, borderRadius: 24 },
+  nativeSheetContent: { flex: 1, height: '100%', maxHeight: '100%', borderRadius: 0, paddingTop: 4, paddingHorizontal: 16, backgroundColor: theme.field },
+  sheetGrabber: { width: 36, height: 5, borderRadius: 3, alignSelf: 'center', marginTop: 9, marginBottom: 15, backgroundColor: theme.choiceBorder },
+  settingsGroup: { gap: 14, padding: 14, borderRadius: 20, borderCurve: 'continuous', backgroundColor: theme.panel },
+  languageSearch: { minHeight: 44, borderRadius: 12, backgroundColor: theme.choice, paddingHorizontal: 12, fontSize: 17, color: theme.text, marginBottom: 16, outlineWidth: 0 },
   root: {
     flex: 1,
   },
-  backgroundPattern: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-  },
-  nonInteractive: {
-    pointerEvents: 'none',
-  },
+  resultEmpty: { flex: 1, minHeight: 155, alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 12 },
+  resultEmptyNarrow: { minHeight: 130 },
+  resultEmptyIcon: { width: 56, height: 56, borderRadius: 18, backgroundColor: theme.activeSurface, alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
+  resultEmptyTitle: { color: theme.text, fontSize: 14, fontWeight: '500', textAlign: 'center' },
+  workspaceFooterText: { color: theme.subtleText, fontSize: 11, textAlign: 'center', paddingTop: 6 },
   safeArea: {
     flex: 1,
+    paddingTop: 8,
   },
   keyboardAvoiding: {
     flex: 1,
@@ -7611,78 +7519,34 @@ function createStyles(theme: AppTheme) {
     fontWeight: '700',
   },
   appShell: {
-    width: '100%',
-    maxWidth: 430,
-    maxHeight: '100%',
-    alignSelf: 'center',
-    overflow: 'hidden',
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: theme.border,
-    backgroundColor: theme.card,
-    shadowColor: theme.shadow,
-    shadowOpacity: theme.name === 'dark' ? 0.38 : 0.28,
-    shadowRadius: 0,
-    shadowOffset: { width: 0, height: 8 },
+    flex: 1, width: '100%', maxWidth: 460, alignSelf: 'center',
   },
   appBody: {
-    flex: 1,
-    backgroundColor: theme.card,
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 12,
+    flex: 1, paddingHorizontal: 20, paddingTop: 6,
   },
   appBodyCompact: {
-    paddingHorizontal: 10,
-    paddingTop: 8,
-    paddingBottom: 10,
+    paddingHorizontal: 16, paddingTop: 4,
   },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    minHeight: 56,
-    backgroundColor: theme.accent,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 88, paddingHorizontal: 22, paddingTop: 12, paddingBottom: 18,
   },
   brandRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+    flexDirection: 'row', alignItems: 'center', gap: 10,
   },
   brandIcon: {
-    width: 32,
-    height: 32,
+    width: 42, height: 42,
   },
   brand: {
-    color: theme.inverseText,
-    fontSize: 18,
-    fontWeight: '900',
-    letterSpacing: 0,
+    color: theme.text, fontSize: 30, fontWeight: '700', letterSpacing: -1.1,
   },
   subtitle: {
-    color: theme.inverseText,
-    fontSize: 12,
-    fontWeight: '700',
-    opacity: 0.75,
+    color: theme.mutedText, fontSize: 12, fontWeight: '400', marginTop: 3,
   },
   headerSettingsButton: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.18)',
-    shadowColor: theme.shadow,
-    shadowOpacity: theme.name === 'dark' ? 0.35 : 0.22,
-    shadowRadius: 0,
-    shadowOffset: { width: 0, height: 3 },
+    width: 48, height: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 24,
   },
   headerSettingsButtonPressed: {
-    transform: [{ translateY: 2 }],
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    shadowOffset: { width: 0, height: 1 },
+    transform: [{ scale: 0.94 }], opacity: 0.75,
   },
   settingsStatusDot: {
     position: 'absolute',
@@ -7696,16 +7560,7 @@ function createStyles(theme: AppTheme) {
     borderColor: theme.accent,
   },
   languageBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    borderRadius: 16,
-    backgroundColor: theme.activeSurface,
-    borderWidth: 1,
-    borderColor: theme.border,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    marginBottom: 8,
+    flexDirection: 'row', alignItems: 'center', gap: 2, padding: 5, marginBottom: 18, borderRadius: 28, shadowColor: theme.shadow, shadowOpacity: 0.06, shadowRadius: 10, shadowOffset: { width: 0, height: 4 },
   },
   languageBarTargetOnly: {
     justifyContent: 'flex-start',
@@ -7725,59 +7580,26 @@ function createStyles(theme: AppTheme) {
     flexDirection: 'row',
   },
   languageBarLabel: {
-    color: theme.subtleText,
-    fontSize: 12,
-    fontWeight: '800',
-    textAlign: 'left',
-    flexShrink: 0,
+    color: theme.mutedText, fontSize: 12, fontWeight: '400', textAlign: 'left', flexShrink: 1, paddingLeft: 12,
   },
   languageButton: {
-    flex: 1,
-    minHeight: 42,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 12,
-    backgroundColor: theme.card,
-    borderWidth: 1,
-    borderColor: theme.border,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    shadowColor: theme.shadow,
-    shadowOpacity: theme.name === 'dark' ? 0.36 : 0.3,
-    shadowRadius: 0,
-    shadowOffset: { width: 0, height: 4 },
+    flex: 1, minWidth: 0, minHeight: 44, flexDirection: 'row', gap: 6, alignItems: 'center', justifyContent: 'center', borderRadius: 14, paddingHorizontal: 6, paddingVertical: 8,
+  },
+  languageButtonRight: {
+    justifyContent: 'flex-end', paddingRight: 12,
   },
   languageName: {
-    color: theme.accentDeep,
-    fontSize: 14,
-    fontWeight: '900',
-    textAlign: 'center',
+    color: theme.accentStrong, fontSize: 15, fontWeight: '600', textAlign: 'center', flexShrink: 1,
   },
   textModeBar: {
-    position: 'relative',
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 15,
-    backgroundColor: theme.field,
-    borderWidth: 1,
-    borderColor: theme.fieldBorder,
-    padding: 4,
-    marginBottom: 8,
+    position: 'relative', flexDirection: 'row', alignItems: 'center', borderRadius: 14, backgroundColor: theme.choice, padding: 4, marginBottom: 16,
   },
   textModeIndicator: {
-    position: 'absolute',
-    pointerEvents: 'none',
-    left: 4,
-    top: 4,
-    bottom: 4,
-    borderRadius: 11,
-    backgroundColor: theme.accent,
-    borderWidth: 1,
-    borderColor: theme.accentStrong,
+    position: 'absolute', pointerEvents: 'none', left: 4, top: 4, bottom: 4, borderRadius: 12, backgroundColor: theme.name === 'dark' ? theme.activeSurface : theme.panel, shadowColor: theme.shadow, shadowOpacity: 0.08, shadowRadius: 5, shadowOffset: { width: 0, height: 2 },
   },
   textModeButton: {
     flex: 1,
-    minHeight: 36,
+    minHeight: 44,
     minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
@@ -7788,49 +7610,30 @@ function createStyles(theme: AppTheme) {
     zIndex: 1,
   },
   textModeButtonPressed: {
-    transform: [{ translateY: 2 }, { scale: 0.98 }],
+    transform: [{ scale: 0.97 }],
   },
   textModeButtonText: {
-    color: theme.accentStrong,
-    fontSize: 12,
-    fontWeight: '900',
+    color: theme.mutedText, fontSize: 12, fontWeight: '500',
   },
   textModeButtonTextActive: {
-    color: theme.inverseText,
+    color: theme.accentStrong, fontWeight: '600',
   },
   workspace: {
-    flex: 1,
+    flex: 1, marginTop: -10,
   },
   workspaceContent: {
-    gap: 12,
-    paddingBottom: 8,
+    paddingBottom: 24, paddingTop: 12,
   },
   panel: {
-    borderRadius: 16,
-    backgroundColor: theme.panel,
-    borderWidth: 1,
-    borderColor: theme.border,
-    padding: 10,
-    shadowColor: theme.shadow,
-    shadowOpacity: theme.name === 'dark' ? 0.3 : 0.2,
-    shadowRadius: 0,
-    shadowOffset: { width: 0, height: 4 },
+    borderTopLeftRadius: 30, borderTopRightRadius: 30, paddingHorizontal: 22, paddingTop: 12, paddingBottom: 20, backgroundColor: theme.panel,
   },
   panelCompact: {
-    padding: 8,
+    paddingHorizontal: 20, paddingTop: 10, paddingBottom: 18,
   },
   resultPanel: {
-    borderRadius: 16,
-    backgroundColor: theme.name === 'dark' ? theme.resultPanel : theme.activeSurface,
-    borderWidth: 1,
-    borderColor: theme.border,
-    padding: 12,
-    minHeight: 124,
-    shadowColor: theme.resultShadow,
-    shadowOpacity: theme.name === 'dark' ? 0.3 : 0.2,
-    shadowRadius: 0,
-    shadowOffset: { width: 0, height: 4 },
+    borderBottomLeftRadius: 30, borderBottomRightRadius: 30, borderCurve: 'continuous', backgroundColor: theme.name === 'dark' ? '#242846' : '#f1f2fd', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.border, padding: 20, minHeight: 212,
   },
+  resultPanelNarrow: { minHeight: 190, padding: 18 },
   panelHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -7844,84 +7647,42 @@ function createStyles(theme: AppTheme) {
     gap: 6,
   },
   panelTitle: {
-    color: theme.text,
-    fontSize: 14,
-    fontWeight: '900',
+    color: theme.mutedText, fontSize: 13, fontWeight: '500',
   },
   panelMeta: {
-    color: theme.mutedText,
-    fontSize: 12,
-    fontWeight: '700',
-    flexShrink: 1,
-    textAlign: 'right',
+    color: theme.accentStrong, fontSize: 13, fontWeight: '500', flexShrink: 1, textAlign: 'right',
   },
   sourceInputFrame: {
-    minHeight: 142,
-    borderRadius: 14,
-    backgroundColor: theme.field,
-    borderWidth: 1,
-    borderColor: theme.fieldBorder,
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 8,
-    shadowColor: theme.shadow,
-    shadowOpacity: theme.name === 'dark' ? 0.28 : 0.18,
-    shadowRadius: 0,
-    shadowOffset: { width: 0, height: 3 },
+    minHeight: 124, paddingTop: 6,
   },
   sourceInputFrameCompact: {
-    minHeight: 132,
-    paddingHorizontal: 10,
-    paddingTop: 9,
-    paddingBottom: 7,
+    minHeight: 116,
   },
-  sourceInputFrameFocused: {
-    borderColor: theme.activeBorder,
-    backgroundColor: theme.name === 'dark' ? theme.field : theme.card,
+  sourceInputFrameNarrow: { minHeight: 104 },
+  panelFocused: {
+    backgroundColor: theme.name === 'dark' ? '#20263f' : '#fdfdff',
   },
   sourceInput: {
-    flex: 1,
-    minHeight: 76,
-    maxHeight: 154,
-    color: theme.text,
-    fontSize: 16,
-    lineHeight: 24,
-    fontWeight: '600',
-    padding: 0,
-    outlineWidth: 0,
+    minHeight: 116, maxHeight: 260, color: theme.text, fontSize: 22, lineHeight: 32, fontWeight: '400', padding: 0, outlineWidth: 0,
   },
   sourceInputCompact: {
-    minHeight: 68,
-    maxHeight: 138,
-    fontSize: 15,
-    lineHeight: 22,
+    minHeight: 108, maxHeight: 230, fontSize: 21, lineHeight: 31,
   },
+  sourceInputNarrow: { minHeight: 96, fontSize: 20, lineHeight: 30 },
   sourceToolbar: {
-    minHeight: 40,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    marginTop: 8,
+    minHeight: 60, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6, paddingHorizontal: 7, paddingVertical: 6,
   },
   sourceToolbarCompact: {
-    minHeight: 38,
-    gap: 8,
-    marginTop: 6,
+    gap: 6,
   },
   sourceToolbarGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
+    flexDirection: 'row', alignItems: 'center', gap: 4,
   },
   sourceToolbarGroupCompact: {
-    gap: 5,
+    gap: 3,
   },
   resultText: {
-    color: theme.text,
-    fontSize: 16,
-    lineHeight: 24,
-    fontWeight: '700',
+    color: theme.text, fontSize: 22, lineHeight: 33, fontWeight: '400',
   },
   furiganaContainer: {
     gap: 4,
@@ -7943,19 +7704,19 @@ function createStyles(theme: AppTheme) {
     color: theme.secondaryAccent,
     fontSize: 10,
     lineHeight: 12,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   furiganaBase: {
     color: theme.text,
     fontSize: 16,
     lineHeight: 21,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   furiganaPlain: {
     color: theme.text,
     fontSize: 16,
     lineHeight: 24,
-    fontWeight: '700',
+    fontWeight: '400',
     marginRight: 2,
     marginBottom: 4,
   },
@@ -7966,7 +7727,7 @@ function createStyles(theme: AppTheme) {
     color: theme.subtleText,
     fontSize: 11,
     lineHeight: 15,
-    fontWeight: '800',
+    fontWeight: '600',
     marginTop: 8,
   },
   markdownContainer: {
@@ -7979,13 +7740,13 @@ function createStyles(theme: AppTheme) {
     color: theme.text,
     fontSize: 16,
     lineHeight: 24,
-    fontWeight: '700',
+    fontWeight: '400',
   },
   markdownHeading: {
     color: theme.accentDeep,
     fontSize: 17,
     lineHeight: 25,
-    fontWeight: '900',
+    fontWeight: '700',
     marginTop: 2,
   },
   markdownHeadingSmall: {
@@ -8002,7 +7763,7 @@ function createStyles(theme: AppTheme) {
     color: theme.secondaryAccent,
     fontSize: 18,
     lineHeight: 26,
-    fontWeight: '900',
+    fontWeight: '700',
     textAlign: 'center',
   },
   markdownNumber: {
@@ -8010,7 +7771,7 @@ function createStyles(theme: AppTheme) {
     color: theme.secondaryAccent,
     fontSize: 15,
     lineHeight: 25,
-    fontWeight: '900',
+    fontWeight: '700',
     textAlign: 'right',
   },
   markdownListText: {
@@ -8018,15 +7779,15 @@ function createStyles(theme: AppTheme) {
     color: theme.text,
     fontSize: 16,
     lineHeight: 24,
-    fontWeight: '700',
+    fontWeight: '400',
   },
   markdownStrong: {
     color: theme.text,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   markdownInlineCode: {
     color: theme.accentDeep,
-    fontWeight: '900',
+    fontWeight: '400',
   },
   markdownCodeBlock: {
     color: theme.accentDeep,
@@ -8038,13 +7799,10 @@ function createStyles(theme: AppTheme) {
     paddingVertical: 6,
     fontSize: 13,
     lineHeight: 18,
-    fontWeight: '800',
+    fontWeight: '400',
   },
   emptyText: {
-    color: theme.subtleText,
-    fontSize: 14,
-    lineHeight: 21,
-    fontWeight: '700',
+    color: theme.mutedText, fontSize: 12, lineHeight: 19, fontWeight: '400', textAlign: 'center',
   },
   configGuidanceCard: {
     minHeight: 72,
@@ -8065,13 +7823,13 @@ function createStyles(theme: AppTheme) {
   configGuidanceTitle: {
     color: theme.accentDeep,
     fontSize: 12,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   configGuidanceText: {
     color: theme.mutedText,
     fontSize: 11,
     lineHeight: 15,
-    fontWeight: '700',
+    fontWeight: '400',
   },
   configGuidanceButton: {
     width: 34,
@@ -8081,7 +7839,7 @@ function createStyles(theme: AppTheme) {
     borderRadius: 11,
     backgroundColor: theme.accent,
     shadowColor: theme.shadow,
-    shadowOpacity: theme.name === 'dark' ? 0.36 : 0.28,
+    shadowOpacity: theme.name === 'dark' ? 0.36 : 0.1,
     shadowRadius: 0,
     shadowOffset: { width: 0, height: 3 },
   },
@@ -8117,7 +7875,7 @@ function createStyles(theme: AppTheme) {
   lightboxTitle: {
     color: theme.inverseText,
     fontSize: 18,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   lightboxSubtitle: {
     color: 'rgba(255,255,255,0.72)',
@@ -8174,16 +7932,11 @@ function createStyles(theme: AppTheme) {
     color: theme.overlayText,
     fontSize: 11,
     lineHeight: 13,
-    fontWeight: '900',
+    fontWeight: '700',
     textAlign: 'center',
   },
   notice: {
-    color: theme.accentStrong,
-    fontSize: 12,
-    fontWeight: '800',
-    textAlign: 'center',
-    paddingTop: 4,
-    paddingBottom: 2,
+    color: theme.mutedText, fontSize: 12, fontWeight: '400', textAlign: 'center', paddingVertical: 6,
   },
   imageModeBar: {
     flex: 1,
@@ -8205,14 +7958,14 @@ function createStyles(theme: AppTheme) {
   segmentButtonActive: {
     backgroundColor: theme.accent,
     shadowColor: theme.shadow,
-    shadowOpacity: theme.name === 'dark' ? 0.34 : 0.26,
+    shadowOpacity: theme.name === 'dark' ? 0.34 : 0.1,
     shadowRadius: 0,
     shadowOffset: { width: 0, height: 3 },
   },
   segmentButtonText: {
     color: theme.mutedText,
     fontSize: 13,
-    fontWeight: '900',
+    fontWeight: '600',
   },
   segmentButtonTextActive: {
     color: theme.inverseText,
@@ -8222,7 +7975,8 @@ function createStyles(theme: AppTheme) {
     alignItems: 'center',
     justifyContent: 'flex-end',
     gap: 7,
-    marginTop: 10,
+    marginTop: 'auto',
+    paddingTop: 14,
   },
   iconButton: {
     flex: 1,
@@ -8235,33 +7989,28 @@ function createStyles(theme: AppTheme) {
     borderWidth: 1,
     borderColor: theme.border,
     shadowColor: theme.shadow,
-    shadowOpacity: theme.name === 'dark' ? 0.36 : 0.3,
+    shadowOpacity: theme.name === 'dark' ? 0.36 : 0.1,
     shadowRadius: 0,
     shadowOffset: { width: 0, height: 4 },
   },
   iconButtonCompact: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 999,
-    backgroundColor: theme.card,
-    borderWidth: 1,
-    borderColor: theme.border,
-    shadowColor: theme.shadow,
-    shadowOpacity: theme.name === 'dark' ? 0.36 : 0.3,
-    shadowRadius: 0,
-    shadowOffset: { width: 0, height: 4 },
+    width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22, backgroundColor: theme.chip,
   },
+  iconButtonQuiet: { backgroundColor: 'transparent' },
+  clearButton: { minHeight: 44, paddingHorizontal: 4, flexDirection: 'row', alignItems: 'center', gap: 5 },
+  clearButtonText: { color: theme.mutedText, fontSize: 11, fontWeight: '400' },
+  translateButton: { minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: 15, borderRadius: 24, borderCurve: 'continuous', backgroundColor: theme.accent, shadowColor: theme.accentStrong, shadowOpacity: 0.3, shadowRadius: 8, shadowOffset: { width: 0, height: 4 } },
+  translateButtonDisabled: { opacity: 0.45, shadowOpacity: 0 },
+  translateButtonText: { color: theme.inverseText, fontSize: 14, fontWeight: '600' },
   iconButtonEmphasized: {
     backgroundColor: theme.accent,
     borderColor: theme.accent,
-    shadowOpacity: theme.name === 'dark' ? 0.42 : 0.34,
+    shadowOpacity: theme.name === 'dark' ? 0.42 : 0.1,
   },
   iconButtonLabel: {
     color: theme.accentStrong,
     fontSize: 11,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   iconButtonLabelEmphasized: {
     color: theme.inverseText,
@@ -8270,26 +8019,15 @@ function createStyles(theme: AppTheme) {
     opacity: 0.45,
   },
   buttonPressed: {
-    transform: [{ translateY: 3 }],
-    shadowOffset: { width: 0, height: 1 },
+    transform: [{ scale: 0.96 }], opacity: 0.8,
   },
   busyOverlay: {
-    position: 'absolute',
-    left: 20,
-    right: 20,
-    bottom: 24,
-    minHeight: 50,
-    borderRadius: 18,
-    backgroundColor: theme.busyBackground,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
+    position: 'absolute', left: 26, right: 26, bottom: 110, minHeight: 46, borderRadius: 23, backgroundColor: theme.busyBackground, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
   },
   busyText: {
     color: theme.inverseText,
     fontSize: 14,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   modalBackdrop: {
     flex: 1,
@@ -8337,64 +8075,37 @@ function createStyles(theme: AppTheme) {
     paddingBottom: 10,
   },
   sheetHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    marginBottom: 12,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 18, paddingHorizontal: 4,
   },
   sheetHeaderText: {
     flex: 1,
     minWidth: 0,
   },
   sheetTitle: {
-    color: theme.text,
-    fontSize: 20,
-    fontWeight: '900',
-    flexShrink: 1,
+    color: theme.text, fontSize: 23, fontWeight: '700', letterSpacing: -0.5, flexShrink: 1,
   },
   sheetSubtitle: {
     color: theme.mutedText,
     fontSize: 12,
     lineHeight: 17,
-    fontWeight: '700',
+    fontWeight: '400',
     marginTop: 2,
     flexShrink: 1,
   },
   languageList: {
-    maxHeight: 520,
+    flexGrow: 0, maxHeight: 640, borderRadius: 20, backgroundColor: theme.panel,
   },
   languageRow: {
-    minHeight: 48,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-start',
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    marginBottom: 6,
-    backgroundColor: theme.field,
+    minHeight: 54, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.border,
   },
   languageRowActive: {
     backgroundColor: theme.activeSurface,
-    borderWidth: 1,
-    borderColor: theme.activeBorder,
   },
   languageRowName: {
-    color: theme.text,
-    fontSize: 15,
-    fontWeight: '800',
+    color: theme.text, fontSize: 17, fontWeight: '400',
   },
   settingsCategoryBar: {
-    minHeight: 58,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    borderRadius: 16,
-    padding: 4,
-    marginBottom: 10,
-    backgroundColor: theme.field,
-    borderWidth: 1,
-    borderColor: theme.fieldBorder,
+    minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: 3, borderRadius: 16, padding: 4, marginBottom: 8, backgroundColor: theme.field,
   },
   settingsCategoryTab: {
     flex: 1,
@@ -8408,8 +8119,7 @@ function createStyles(theme: AppTheme) {
     borderColor: 'transparent',
   },
   settingsCategoryTabActive: {
-    backgroundColor: theme.activeSurface,
-    borderColor: theme.activeBorder,
+    backgroundColor: theme.panel, borderColor: theme.border, shadowColor: theme.shadow, shadowOpacity: 0.04, shadowRadius: 4, shadowOffset: { width: 0, height: 2 },
   },
   settingsCategoryTabPressed: {
     opacity: 0.82,
@@ -8418,15 +8128,14 @@ function createStyles(theme: AppTheme) {
   settingsCategoryTabText: {
     color: theme.mutedText,
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   settingsCategoryTabTextActive: {
     color: theme.accentStrong,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   settingsContent: {
-    gap: 0,
-    paddingBottom: 14,
+    gap: 6, paddingBottom: 16,
   },
   setupContent: {
     gap: 12,
@@ -8451,13 +8160,13 @@ function createStyles(theme: AppTheme) {
   setupChoiceTitle: {
     color: theme.text,
     fontSize: 15,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   setupChoiceText: {
     color: theme.mutedText,
     fontSize: 12,
     lineHeight: 17,
-    fontWeight: '700',
+    fontWeight: '400',
     outlineWidth: 0,
   },
   wizardStepRow: {
@@ -8504,12 +8213,12 @@ function createStyles(theme: AppTheme) {
   wizardButtonText: {
     color: theme.mutedText,
     fontSize: 14,
-    fontWeight: '900',
+    fontWeight: '600',
   },
   wizardButtonPrimaryText: {
     color: theme.inverseText,
     fontSize: 14,
-    fontWeight: '900',
+    fontWeight: '600',
   },
   quickFillButton: {
     minHeight: 40,
@@ -8523,35 +8232,26 @@ function createStyles(theme: AppTheme) {
   quickFillButtonText: {
     color: theme.accentStrong,
     fontSize: 12,
-    fontWeight: '900',
+    fontWeight: '600',
   },
   wizardHint: {
     color: theme.mutedText,
     fontSize: 12,
     lineHeight: 17,
-    fontWeight: '700',
+    fontWeight: '400',
     borderRadius: 14,
     backgroundColor: theme.field,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
   settingsSection: {
-    gap: 11,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.footerBorder,
+    gap: 9, paddingTop: 16, paddingBottom: 8,
   },
   settingsSectionTitle: {
-    color: theme.accentDeep,
-    fontSize: 16,
-    fontWeight: '900',
+    color: theme.mutedText, fontSize: 13, fontWeight: '500',
   },
   settingsSectionHeader: {
-    minHeight: 24,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
+    minHeight: 30, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingHorizontal: 8,
   },
   settingsHelpButton: {
     width: 32,
@@ -8564,7 +8264,7 @@ function createStyles(theme: AppTheme) {
     color: theme.mutedText,
     fontSize: 12,
     lineHeight: 17,
-    fontWeight: '700',
+    fontWeight: '400',
   },
   settingsContentLoading: {
     minHeight: 180,
@@ -8582,7 +8282,7 @@ function createStyles(theme: AppTheme) {
   linkedSettingsTitle: {
     color: theme.text,
     fontSize: 13,
-    fontWeight: '900',
+    fontWeight: '600',
   },
   runtimeCheck: {
     minHeight: 58,
@@ -8612,19 +8312,19 @@ function createStyles(theme: AppTheme) {
   runtimeCheckTitle: {
     color: theme.text,
     fontSize: 13,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   runtimeCheckDetail: {
     color: theme.mutedText,
     fontSize: 11,
     lineHeight: 15,
-    fontWeight: '700',
+    fontWeight: '400',
   },
   modelPackRoot: {
     color: theme.subtleText,
     fontSize: 10,
     lineHeight: 14,
-    fontWeight: '700',
+    fontWeight: '400',
     borderRadius: 12,
     backgroundColor: theme.field,
     borderWidth: 1,
@@ -8662,18 +8362,10 @@ function createStyles(theme: AppTheme) {
   fieldLabel: {
     color: theme.mutedText,
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   fieldInput: {
-    minHeight: 44,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: theme.fieldBorder,
-    backgroundColor: theme.field,
-    color: theme.text,
-    paddingHorizontal: 12,
-    fontSize: 14,
-    fontWeight: '700',
+    minHeight: 48, borderRadius: 11, borderWidth: StyleSheet.hairlineWidth, borderColor: theme.fieldBorder, backgroundColor: theme.field, color: theme.text, paddingHorizontal: 12, fontSize: 15, fontWeight: '400',
   },
   secureFieldInputWrap: {
     position: 'relative',
@@ -8697,22 +8389,14 @@ function createStyles(theme: AppTheme) {
     gap: 8,
   },
   choice: {
-    minHeight: 36,
-    justifyContent: 'center',
-    borderRadius: 999,
-    backgroundColor: theme.choice,
-    paddingHorizontal: 12,
-    borderWidth: 1,
-    borderColor: theme.choiceBorder,
+    minHeight: 44, justifyContent: 'center', borderRadius: 12, backgroundColor: theme.field, paddingHorizontal: 12, borderWidth: 1, borderColor: theme.border,
   },
   choiceActive: {
     backgroundColor: theme.activeSurface,
     borderColor: theme.activeBorder,
   },
   choiceText: {
-    color: theme.mutedText,
-    fontSize: 12,
-    fontWeight: '900',
+    color: theme.mutedText, fontSize: 12, fontWeight: '500',
   },
   choiceTextActive: {
     color: theme.accentStrong,
@@ -8727,9 +8411,7 @@ function createStyles(theme: AppTheme) {
     paddingHorizontal: 12,
   },
   toggleLabel: {
-    color: theme.text,
-    fontSize: 14,
-    fontWeight: '800',
+    color: theme.text, fontSize: 14, fontWeight: '400', flex: 1, paddingVertical: 10, paddingRight: 10,
   },
   configActionGrid: {
     flexDirection: 'row',
@@ -8752,7 +8434,7 @@ function createStyles(theme: AppTheme) {
   configActionText: {
     color: theme.accentStrong,
     fontSize: 12,
-    fontWeight: '900',
+    fontWeight: '600',
   },
   payloadInput: {
     minHeight: 92,
@@ -8766,7 +8448,7 @@ function createStyles(theme: AppTheme) {
     paddingVertical: 10,
     fontSize: 12,
     lineHeight: 17,
-    fontWeight: '700',
+    fontWeight: '400',
   },
   importPayloadButton: {
     minHeight: 42,
@@ -8782,7 +8464,7 @@ function createStyles(theme: AppTheme) {
   importPayloadButtonText: {
     color: theme.inverseText,
     fontSize: 13,
-    fontWeight: '900',
+    fontWeight: '600',
   },
   qrPreview: {
     alignSelf: 'center',
@@ -8801,13 +8483,13 @@ function createStyles(theme: AppTheme) {
   qrCaption: {
     color: theme.mutedText,
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   configStatus: {
     color: theme.accentStrong,
     fontSize: 12,
     lineHeight: 17,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   qrScannerSheet: {
     height: '72%',
@@ -8859,13 +8541,13 @@ function createStyles(theme: AppTheme) {
   deviceQACheckTitle: {
     color: theme.text,
     fontSize: 13,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   deviceQACheckDetail: {
     color: theme.mutedText,
     fontSize: 11,
     lineHeight: 15,
-    fontWeight: '700',
+    fontWeight: '400',
   },
   cameraShell: {
     flex: 1,
@@ -8888,47 +8570,26 @@ function createStyles(theme: AppTheme) {
     backgroundColor: 'transparent',
   },
   settingsFooter: {
-    flexDirection: 'row',
-    gap: 10,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: theme.footerBorder,
+    flexDirection: 'row', gap: 10, paddingTop: 12, paddingBottom: 2,
   },
   footerButton: {
-    flex: 1,
-    minHeight: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 16,
-    backgroundColor: theme.choice,
+    flex: 1, minHeight: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 24, backgroundColor: theme.choice,
   },
   footerButtonPrimary: {
-    flex: 1,
-    minHeight: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 16,
-    backgroundColor: theme.accent,
-    shadowColor: theme.shadow,
-    shadowOpacity: 0.16,
-    shadowRadius: 0,
-    shadowOffset: { width: 0, height: 4 },
+    flex: 1, minHeight: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 24, backgroundColor: theme.accent, shadowColor: theme.accentStrong, shadowOpacity: 0.2, shadowRadius: 8, shadowOffset: { width: 0, height: 4 },
   },
   settingsSaveButton: {
-    shadowColor: theme.accentDeep,
-    shadowOpacity: theme.name === 'dark' ? 0.44 : 0.32,
-    shadowRadius: 0,
-    shadowOffset: { width: 0, height: 4 },
+    shadowColor: theme.accentStrong, shadowOpacity: 0.2, shadowRadius: 8, shadowOffset: { width: 0, height: 4 },
   },
   footerButtonText: {
     color: theme.mutedText,
     fontSize: 15,
-    fontWeight: '900',
+    fontWeight: '600',
   },
   footerButtonPrimaryText: {
     color: theme.inverseText,
     fontSize: 15,
-    fontWeight: '900',
+    fontWeight: '600',
   },
   });
 }

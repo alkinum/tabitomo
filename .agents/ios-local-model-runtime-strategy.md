@@ -1,7 +1,7 @@
 # tabitomo iOS Local Model Runtime and Cache Strategy
 
 Status: implemented initial. Fixed R2 model distribution, verified native install, sherpa-onnx Whisper/SenseVoice inference, ONNX Runtime PP-OCR inference, deterministic engine selection, and Apple fallback are wired. Signed-device latency, memory, accuracy, rotation, and offline QA remain release gates.
-Last updated: 2026-07-11
+Last updated: 2026-07-15
 Primary target: iOS native Expo dev-client/TestFlight build
 Related tracker: `.agents/expo-universal-app-requirements.md`
 
@@ -16,7 +16,7 @@ The app ships native runtime code but downloads model weights only when the user
 For iOS parity:
 
 - Whisper Base and SenseVoice Small run through sherpa-onnx 1.13.4. `speechRecognition.localEngine` selects exactly one model; another downloaded ASR model cannot override it.
-- PP-OCR v5 Mobile runs detector and recognizer ONNX files through ONNX Runtime 1.27.0 with a generated character dictionary.
+- PP-OCR v6 Small runs detector and recognizer ONNX files through ONNX Runtime 1.27.0 with its 18,708-entry character dictionary.
 - Apple on-device Speech and Apple Vision remain recoverable fallbacks when the selected model is absent, incompatible, or cannot run.
 - Cloud BYOK ASR/OCR/VLM paths remain separately selectable.
 - Runtime code is bundled; model weights are not bundled and never sync through iCloud or `.ttconfig`.
@@ -26,11 +26,11 @@ For iOS parity:
 
 | Output | Current answer |
 | --- | --- |
-| Chosen runtime for OCR | ONNX Runtime 1.27.0 with PP-OCR v5 Mobile detector, recognizer, and `dict.txt`; Apple Vision fallback. |
+| Chosen runtime for OCR | ONNX Runtime 1.27.0 with PP-OCR v6 Small detector, recognizer, and `dict.txt`; Apple Vision fallback. |
 | Chosen runtime for ASR | sherpa-onnx 1.13.4 offline recognizer for Whisper Base and SenseVoice Small; Apple on-device Speech fallback. |
 | Model format and conversion steps | Whisper uses sherpa encoder/decoder int8 ONNX plus tokens; SenseVoice uses int8 ONNX plus tokens; PP-OCR uses det/rec ONNX plus a structured-YAML-derived dictionary. |
 | Expected app binary size impact | Apple baseline: near zero beyond native module code. whisper.cpp prototype: expect native runtime/linker impact in the low tens of MB after stripping. ONNX Runtime Mobile or sherpa-onnx prototype: expect a similar or larger low-to-mid tens of MB impact depending on selected operators. |
-| Expected first-run model download size | Apple baseline: 0 MB. Whisper tiny/base packs should be treated as tens to low hundreds of MB. Whisper small or larger should be treated as hundreds of MB and opt-in only. Custom OCR det/rec/cls packs should be estimated as tens of MB until measured from the selected PP-OCR assets. |
+| Expected first-run model download size | Apple baseline: 0 MB. Whisper tiny/base packs should be treated as tens to low hundreds of MB. Whisper small or larger should be treated as hundreds of MB and opt-in only. PP-OCR v6 Small is 31,277,677 bytes including ONNX, configs, dictionary, and license. |
 | Offline behavior | Downloaded packs run without network after verification. Missing/invalid packs use Apple local fallback when available and otherwise show a download/language action. |
 | Minimum iOS version | Release must set an explicit iOS deployment target before RC. Recommendation: iOS 17+ for the first TestFlight unless product distribution requires older devices; do not commit below iOS 16 until native Speech, Vision, Expo modules, and model-runtime prototypes are tested there. |
 | License review notes | Apple baseline avoids third-party model redistribution. Before shipping custom packs, verify runtime license, model-weight license, attribution requirements, and commercial redistribution terms for whisper.cpp, Whisper weights, sherpa-onnx, SenseVoice, ONNX Runtime, PaddleOCR/PP-OCR, and any hosted model bundle. |
@@ -42,7 +42,7 @@ For iOS parity:
 | --- | --- | --- | --- |
 | Browser Web Speech replacement | Apple Speech online/on-device | None needed unless Apple coverage fails | Real-device speech QA passes for source languages used by the product. |
 | Web local ASR parity | sherpa-onnx Whisper Base or SenseVoice Small | Apple on-device Speech fallback | Keep enabled only if signed-device latency, memory, accuracy, and license gates pass. |
-| Web local PP-OCR parity | ONNX Runtime PP-OCR v5 Mobile | Apple Vision fallback | Keep enabled only if menu/sign/receipt accuracy and overlay geometry pass signed-device QA. |
+| Web local PP-OCR parity | ONNX Runtime PP-OCR v6 Small | Apple Vision fallback | Keep enabled only if menu/sign/receipt accuracy and overlay geometry pass signed-device QA. |
 | Japanese furigana local path | Provider fallback plus native ruby-style rendering | Bundled dictionary/tokenizer or server fallback | Decide separately after provider QA; do not bundle large dictionaries without size review. |
 
 ## Model Pack and Cache Design
@@ -134,7 +134,7 @@ For iOS, the UI should interpret them as:
 
 - `provider = local`: use the downloaded model selected by `localEngine`; fall back to Apple on-device Speech when it is not ready.
 - `localEngine = whisper | sensevoice`: deterministically selects `whisper-base` or `sensevoice-small`.
-- `imageOCR.provider = local-ppocr`: use downloaded PP-OCR v5 Mobile; fall back to Apple Vision when it is not ready.
+- `imageOCR.provider = local-ppocr`: use downloaded PP-OCR v6 Small; fall back to Apple Vision when it is not ready.
 
 Settings validation must show three separate states:
 
@@ -145,7 +145,7 @@ Settings validation must show three separate states:
 Current activation behavior:
 
 - Shared core exposes `selectModelPackActivation(installed, environment, feature, nativeBaselineRuntime)`.
-- ASR selection first filters to the exact fixed model selected by `localEngine`; OCR filters to `ppocr-v5-mobile`. Version/install-time preference only applies within that model ID.
+- ASR selection first filters to the exact fixed model selected by `localEngine`; OCR filters to `ppocr-v6-small`. Version/install-time preference only applies within that model ID.
 - If no custom pack is ready, iOS falls back to the native baseline runtime: Apple Speech for ASR and Apple Vision for OCR.
 - If installed packs exist but none are compatible and no baseline is available, the selector reports `no-compatible-pack` with the latest compatibility reason.
 - If neither an installed pack nor a baseline is available, the selector reports `no-baseline`.
@@ -215,7 +215,7 @@ Compare:
 3. Add a Settings "Local models" section with installed size, runtime check, fixed download/update/delete actions, and active runtime status. Status: implemented without path/URL/manifest inputs. Real-device visual and storage QA remains.
 4. Add real-device benchmark logging that redacts API keys and imported config payloads. Status: implemented initial for the hidden Device QA surface as a copy/share JSON report with app/runtime metadata, image readiness, and per-check `outcome`, `result`, `startedAt`, `finishedAt`, and `durationMs` records while omitting provider credentials, imported config payloads, and local image/file URIs. Detailed memory and accuracy benchmark fields remain pending.
 5. Run Whisper Base and SenseVoice Small through the shared sherpa-onnx adapter. Status: implemented; signed-device quality/performance measurements remain.
-6. Run PP-OCR v5 Mobile through ONNX Runtime and retain Apple Vision fallback. Status: implemented; rotated/low-light/small-text QA remains.
+6. Run PP-OCR v6 Small through ONNX Runtime and retain Apple Vision fallback. Status: fixed R2 publication and Release simulator inference are complete; real-device rotated, low-light, and small-text QA remain.
 7. Measure binary size, peak memory, latency, thermal behavior, and offline relaunch on supported iPhones.
 8. Promote or tune model defaults only from real-device evidence.
 

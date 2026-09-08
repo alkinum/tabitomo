@@ -4,15 +4,19 @@ Mobile downloads only fixed model IDs from `https://assets.tabitomo.alkinum.io`:
 
 - `models/asr/whisper-base/manifest.json`
 - `models/asr/sensevoice-small/manifest.json`
-- `models/ocr/ppocr-v5-mobile/manifest.json`
+- `models/ocr/ppocr-v6-small/manifest.json`
 
 The Cloudflare R2 bucket is `tabitomo-assets`. Its custom domain is `assets.tabitomo.alkinum.io`. Model binaries are versioned and immutable; each fixed manifest is uploaded last with `no-cache`.
 
-Published production assets (verified 2026-07-11):
+Published production assets (verified 2026-07-15):
 
 - Whisper Base int8: `160610353` bytes, MIT
 - SenseVoice Small int8: `239550971` bytes, MIT
-- PP-OCR v5 Mobile ONNX: `21521924` bytes, Apache-2.0
+- PP-OCR v6 Small ONNX: `31277677` bytes, Apache-2.0
+- Manifest: `output/model-manifests/ppocr-v6-small.json`
+- Runtime files: `det.onnx`, `det.yml`, `rec.onnx`, `rec.yml`, `dict.txt`, `LICENSE.txt`
+
+PP-OCR v5 Mobile was retired from R2 on 2026-07-15 after the v6 Small remote asset checks and native Release simulator smoke passed. Its manifest and six versioned runtime files now return `404`.
 
 Run `rtk pnpm test:mobile:model-assets` to verify all manifests, object HEAD responses, content lengths, fixed-origin URLs, licenses, and SHA-256 metadata.
 

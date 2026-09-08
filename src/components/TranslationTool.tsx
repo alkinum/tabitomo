@@ -1,3 +1,6 @@
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { hasProviderConnection } from '../utils/config/settings';
 import React, { useEffect, useState, useRef, lazy, Suspense } from 'react';
 import { translateText, SUPPORTED_LANGUAGES, type LanguageCode } from '../utils/translation/translation';
 import { speakText, getSpeechLocale } from '../utils/audio/speech';
@@ -6,7 +9,7 @@ import { RealtimeTranscriptionService } from '../utils/audio/realtimeTranscripti
 import { localAsrService } from '../utils/audio/localAsr';
 import { performOCR, imageToBase64, streamTranslateImageWithVLM } from '../utils/image/imageOcr';
 import { explainWord, quickQA } from '../utils/translation/explanation';
-import { Mic, Image as ImageIcon, ArrowUpDown, X, Copy, Check, Volume2, Camera, Keyboard, Settings, MessageCircle } from 'lucide-react';
+import { Mic, Image as ImageIcon, ArrowLeftRight, X, Copy, Check, Volume2, Camera, Keyboard, Settings, MessageCircle, Languages, ScanText, Sparkles, Eraser, ArrowRight, Loader2 } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import { AISettings } from '../utils/config/settings';
 import { ImageLightbox } from './ImageLightbox';
@@ -102,7 +105,6 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
   const [useVLMMode, setUseVLMMode] = useState(false);
-  const [parsedMarkdown, setParsedMarkdown] = useState<string>('');
   // Animation refs
   const targetInputRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -121,7 +123,7 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
 
   // Check if general AI service is configured
   const isGeneralAIConfigured = () => {
-    return !!(settings.generalAI.apiKey && settings.generalAI.endpoint && settings.generalAI.modelName);
+    return !!(hasProviderConnection(settings.generalAI));
   };
 
   // Check if VLM is configured
@@ -133,7 +135,7 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
       return isGeneralAIConfigured();
     } else if (vlmConfig.useCustom) {
       // Using custom VLM settings
-      return !!(vlmConfig.apiKey && vlmConfig.endpoint && vlmConfig.modelName);
+      return !!(hasProviderConnection(vlmConfig));
     } else {
       // Using OCR settings - check if OCR is using General AI or its own settings
       if (settings.imageOCR.useGeneralAI) {
@@ -141,7 +143,7 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
       } else if (settings.imageOCR.provider === 'local-ppocr') {
         return false;
       } else {
-        return !!(settings.imageOCR.apiKey && settings.imageOCR.endpoint);
+        return !!(hasProviderConnection(settings.imageOCR));
       }
     }
   };
@@ -153,7 +155,7 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
     } else if (settings.imageOCR.provider === 'local-ppocr') {
       return true;
     } else {
-      return !!(settings.imageOCR.apiKey && settings.imageOCR.endpoint);
+      return !!(hasProviderConnection(settings.imageOCR));
     }
   };
 
@@ -161,10 +163,14 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
   const handleInputMethodChange = (method: InputMethod) => {
     const previousMethod = inputMethod;
     setInputMethod(method);
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    translationAbortControllerRef.current?.abort(); explanationAbortControllerRef.current?.abort();
+    qaAbortControllerRef.current?.abort(); imageAbortControllerRef.current?.abort();
+    setIsTranslating(false); setIsProcessingImage(false);
     // Reset text mode when changing input method
     setTextMode('translation');
     // Clear all inputs and outputs
-    setSourceText('');
+    if (previousMethod === 'image' || method === 'image') setSourceText('');
     setTargetText('');
     setImage(null);
     setTranslatedImage(null);
@@ -261,18 +267,6 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
     }
   }, [targetText, targetLang]);
 
-  // Parse markdown when targetText changes for VLM/QA/Explanation modes
-  useEffect(() => {
-    if (targetText && (useVLMMode || inputMethod === 'qa' || textMode === 'explanation')) {
-      // Dynamically import marked only when needed
-      import('marked').then(({ marked }) => {
-        setParsedMarkdown(marked.parse(targetText) as string);
-      });
-    } else {
-      setParsedMarkdown('');
-    }
-  }, [targetText, useVLMMode, inputMethod, textMode]);
-
   // Handle language swap
   const handleSwapLanguages = () => {
     setSourceLang(targetLang);
@@ -357,16 +351,6 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
       return;
     }
 
-    // Check if source and target languages are the same
-    if (wordLang === explanationLang) {
-      toast({
-        variant: "destructive",
-        title: "Invalid Language Selection",
-        description: "Source and target languages cannot be the same. Please select a different target language.",
-      });
-      return;
-    }
-
     // Check if general AI is configured
     if (!isGeneralAIConfigured()) {
       toast({
@@ -446,16 +430,6 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
       return;
     }
 
-    // Check if source and target languages are the same
-    if (questionLang === answerLang) {
-      toast({
-        variant: "destructive",
-        title: "Invalid Language Selection",
-        description: "Source and target languages cannot be the same. Please select a different target language.",
-      });
-      return;
-    }
-
     // Check if general AI is configured
     if (!isGeneralAIConfigured()) {
       toast({
@@ -528,10 +502,18 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
     }
   };
 
+  const runCurrentText = (text: string) => {
+    if (inputMethod === 'qa') void handleQA(text, sourceLang, targetLang);
+    else if (textMode === 'explanation') void handleWordExplanation(text, sourceLang, targetLang);
+    else void handleTranslate(text, sourceLang, targetLang);
+  };
+
   // Handle text input
   const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newText = e.target.value;
     setSourceText(newText);
+    translationAbortControllerRef.current?.abort(); explanationAbortControllerRef.current?.abort(); qaAbortControllerRef.current?.abort();
+    setIsTranslating(false); setError(null); setTargetText('');
 
     // Clear previous timer
     if (debounceTimerRef.current) {
@@ -601,6 +583,7 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
           // Helper to determine if source language uses spaces
           const sourceLangUsesSpaces = !['zh', 'ja', 'ko'].includes(sourceLang);
 
+          let accumulatedTranscript = '';
           realtimeTranscriptionRef.current = new RealtimeTranscriptionService(settings, {
             sourceLang,
             onTranscript: (text: string, isFinal: boolean) => {
@@ -608,12 +591,9 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
 
               if (isFinal) {
                 // Final transcript - append to source text
-                setSourceText(prev => {
-                  if (!prev) return text;
-                  // Smart joining: use space for languages that use spaces, no space for CJK
-                  const separator = sourceLangUsesSpaces ? ' ' : '';
-                  return prev + separator + text;
-                });
+                const separator = sourceLangUsesSpaces ? ' ' : '';
+                accumulatedTranscript = accumulatedTranscript ? accumulatedTranscript + separator + text : text;
+                setSourceText(accumulatedTranscript);
 
                 // Clear interim transcript
                 setInterimTranscript('');
@@ -624,9 +604,9 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
                 }
 
                 realtimeTranslationTimerRef.current = setTimeout(() => {
-                  const currentText = sourceText + (sourceLangUsesSpaces ? ' ' : '') + text;
+                  const currentText = accumulatedTranscript;
                   if (currentText.trim()) {
-                    handleTranslate(currentText.trim(), sourceLang, targetLang);
+                    runCurrentText(currentText.trim());
                   }
                 }, 800); // Wait 800ms after last final transcript before translating
               } else {
@@ -686,7 +666,7 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
                 : await transcribeAudioSiliconFlow(audioBlob, settings);
               setSourceText(transcribedText);
               if (transcribedText) {
-                handleTranslate(transcribedText, sourceLang, targetLang);
+                runCurrentText(transcribedText);
               }
             } catch (err) {
               console.error('Transcription error:', err);
@@ -794,7 +774,7 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
       const textToTranslate = (finalTranscript || sourceText).trim();
       if (textToTranslate && !isTranslating) {
         setSourceText(textToTranslate);
-        handleTranslate(textToTranslate, sourceLang, targetLang);
+        runCurrentText(textToTranslate);
       }
       return;
     }
@@ -813,12 +793,12 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
 
     // Translate after stopping (only for Web Speech API; other providers translate after transcription finishes)
     if (speechProvider === 'web-speech' && sourceText) {
-      handleTranslate(sourceText, sourceLang, targetLang);
+      runCurrentText(sourceText);
     }
   };
 
   // Process image (shared between upload and camera)
-  const processImage = async (base64Image: string) => {
+  const processImage = async (base64Image: string, visionMode = useVLMMode) => {
     // Check if source and target languages are the same
     if (sourceLang === targetLang) {
       toast({
@@ -844,7 +824,7 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
       setImage(base64Image);
 
       // VLM Mode: Direct translation without OCR (with streaming)
-      if (useVLMMode) {
+      if (visionMode) {
         console.log('[Image VLM] Starting VLM streaming translation...');
 
         // Check if VLM is configured
@@ -905,12 +885,13 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
         return;
       }
 
+      if (!isOCRConfigured()) throw new Error('Connect an OCR provider in Image settings.');
       // OCR Mode: OCR + Canvas overlay
       console.log('[Image OCR] Starting OCR process...');
       console.log('[Image OCR] Image size:', base64Image.length, 'bytes');
 
       // Perform OCR
-      const ocrTexts = await performOCR(base64Image, settings.imageOCR);
+      const ocrTexts = await performOCR(base64Image, settings, abortController.signal);
 
       // Check if request was cancelled after OCR
       if (abortController.signal.aborted) {
@@ -945,10 +926,20 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
 
       console.log('[Image Translation] All translations completed');
 
+      if (!ocrTexts.some((line) => line.rotate_rect)) {
+        setTranslatedImage(null);
+        setSourceText(ocrTexts.map((line) => line.text).join('\n'));
+        setTargetText(translations.join('\n'));
+        setIsProcessingImage(false); imageAbortControllerRef.current = null;
+        if (!ocrTexts.length) setError('No readable text found. Try a clearer photo.');
+        return;
+      }
+
       // Create canvas for image overlay
       console.log('[Canvas] Creating canvas for image overlay');
       const img = new Image();
       img.onload = () => {
+        if (abortController.signal.aborted) return;
         const canvas = document.createElement('canvas');
         canvas.width = img.width;
         canvas.height = img.height;
@@ -1315,463 +1306,75 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
     },
     maxFiles: 1,
   });
-  // Add animation styles
-  useEffect(() => {
-    const style = document.createElement('style');
-    style.textContent = `
-      @keyframes rotate {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-      }
-      .rotate-animation {
-        animation: rotate 0.5s ease;
-      }
-      @keyframes fadeIn {
-        0% { opacity: 0.7; transform: translateY(5px); }
-        100% { opacity: 1; transform: translateY(0); }
-      }
-      .fade-in {
-        animation: fadeIn 0.3s ease forwards;
-      }
-      .cute-shadow {
-        box-shadow: 0 4px 0 rgba(0,0,0,0.1);
-        transform: translateY(0);
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
-      }
-      .cute-shadow:active {
-        box-shadow: 0 2px 0 rgba(0,0,0,0.1);
-        transform: translateY(2px);
-      }
-      .static-shadow {
-        box-shadow: 0 4px 0 rgba(0,0,0,0.1);
-      }
-      .btn-pop {
-        transition: transform 0.2s ease;
-      }
-      .btn-pop:active {
-        transform: scale(0.95);
-      }
-      /* Ruby annotation styles for furigana */
-      ruby {
-        display: inline-flex;
-        flex-direction: column;
-        vertical-align: baseline;
-        line-height: 2;
-        text-align: center;
-      }
-      rt {
-        display: block;
-        font-size: 0.5em;
-        line-height: 1;
-        text-align: center;
-        user-select: none;
-      }
-      rb {
-        display: block;
-        line-height: 1.2;
-      }
-    `;
-    document.head.appendChild(style);
-    return () => {
-      document.head.removeChild(style);
-    };
-  }, []);
-  return <div className="w-full max-w-md bg-white dark:bg-gray-800 rounded-3xl shadow-lg overflow-hidden -mt-4 sm:mt-0">
-      {/* Header */}
-      <div className="p-4 bg-indigo-500 text-white flex items-center justify-between">
-        <div className="flex items-center space-x-2">
-          <img src="/icons/buddy.png" alt="tabitomo" className="h-8 w-8" />
-          <h1 className="text-lg font-bold">tabitomo</h1>
+  const selectWorkspaceMode = (mode: 'translation' | 'explanation' | 'qa') => {
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    translationAbortControllerRef.current?.abort();
+    explanationAbortControllerRef.current?.abort();
+    qaAbortControllerRef.current?.abort();
+    imageAbortControllerRef.current?.abort();
+    setIsTranslating(false); setIsProcessingImage(false); setError(null);
+    setTargetText(''); setTranslatedImage(null);
+    handleInputMethodChange(mode === 'qa' ? 'qa' : 'text');
+    setTextMode(mode === 'explanation' ? 'explanation' : 'translation');
+  };
+  const runText = () => {
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    if (inputMethod === 'qa') void handleQA(sourceText, sourceLang, targetLang);
+    else if (textMode === 'explanation') void handleWordExplanation(sourceText, sourceLang, targetLang);
+    else void handleTranslate(sourceText, sourceLang, targetLang);
+  };
+  const busy = isTranslating || isProcessingImage;
+  const assistantMode = inputMethod === 'qa' || (inputMethod === 'text' && textMode === 'explanation');
+  const resultTitle = inputMethod === 'qa' ? 'Answer' : textMode === 'explanation' ? 'Explanation' : 'Translation';
+  return <main className="tabitomo-workspace" aria-label="Translation workspace">
+    <header className="workspace-brandbar">
+      <div className="workspace-brand"><img src="/icons/buddy.png" alt="" /><div><h1>tabitomo</h1><p>A little help, wherever you go.</p></div></div>
+      <button type="button" className="workspace-icon" title="Settings" aria-label="Settings" onClick={() => onOpenSettings()}><Settings size={20} /></button>
+    </header>
+    <nav className="workspace-modes" aria-label="Assistant mode">
+      <button disabled={isRecording} aria-pressed={!assistantMode} onClick={() => selectWorkspaceMode('translation')}><Languages size={17} />Translate</button>
+      <button disabled={isRecording} aria-pressed={inputMethod === 'text' && textMode === 'explanation'} onClick={() => selectWorkspaceMode('explanation')}><ScanText size={17} />Explain</button>
+      <button disabled={isRecording} aria-pressed={inputMethod === 'qa'} onClick={() => selectWorkspaceMode('qa')}><MessageCircle size={17} />Q&A</button>
+    </nav>
+    <div className="workspace-languages">
+      {/* For explanation and Q/A: Only show target language */}
+      {!assistantMode && <>
+        <Select value={sourceLang} onValueChange={(value) => setSourceLang(value as LanguageCode)}><SelectTrigger aria-label="Source language"><SelectValue /></SelectTrigger><SelectContent>{languageOptions.map((lang) => <SelectItem key={lang.value} value={lang.value}>{lang.label}</SelectItem>)}</SelectContent></Select>
+        <button id="swap-button" aria-label="Swap languages" title="Swap languages" className="workspace-icon" onClick={handleSwapLanguages}><ArrowLeftRight size={18} /></button>
+      </>}
+      {assistantMode && <span className="workspace-language-label">Target Language</span>}
+      <Select value={targetLang} onValueChange={(value) => setTargetLang(value as LanguageCode)}><SelectTrigger aria-label="Target language"><SelectValue /></SelectTrigger><SelectContent>{languageOptions.map((lang) => <SelectItem key={lang.value} value={lang.value}>{lang.label}</SelectItem>)}</SelectContent></Select>
+    </div>
+    <div className="workspace-content">
+      <section className="workspace-source" aria-label="Source">
+        <div className="workspace-panel-heading"><h2><Languages size={17} />{inputMethod === 'image' ? 'Photo' : inputMethod === 'qa' ? 'Your question' : 'Source'}</h2>{(sourceText || image) && <button className="workspace-clear" aria-label="Clear" title="Clear" disabled={isRecording} onClick={() => { if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current); translationAbortControllerRef.current?.abort(); explanationAbortControllerRef.current?.abort(); qaAbortControllerRef.current?.abort(); imageAbortControllerRef.current?.abort(); setSourceText(''); setTargetText(''); setImage(null); setTranslatedImage(null); setIsTranslating(false); setIsProcessingImage(false); setError(null); }}><Eraser size={16} />Clear</button>}</div>
+        {inputMethod === 'image' ? <div className="workspace-photo">
+          {image ? <><img src={image} alt="Original" /><button className="workspace-icon photo-remove" aria-label="Remove image" onClick={() => { imageAbortControllerRef.current?.abort(); setIsProcessingImage(false); setImage(null); setTranslatedImage(null); setTargetText(''); }}><X size={17} /></button></> : <div {...getRootProps()} className="workspace-dropzone"><input {...getInputProps()} /><ImageIcon size={30} /><strong>Bring a photo, find the words.</strong><span>Drop an image or tap to choose</span><button className="workspace-secondary" onClick={(e) => { e.stopPropagation(); setIsCameraOpen(true); }}><Camera size={16} />Open camera</button></div>}
+        </div> : <textarea ref={textareaRef} aria-label="Source text" value={sourceText + (interimTranscript && isRecording ? (sourceText ? ' ' : '') + interimTranscript : '')} onChange={handleTextChange} placeholder={isRecording ? 'Listening…' : inputMethod === 'qa' ? 'How do I ask for the check?' : textMode === 'explanation' ? 'A word, a phrase, something new…' : `What would you like to say in ${SUPPORTED_LANGUAGES[sourceLang]}?`} readOnly={isRecording} className="workspace-textarea custom-scrollbar" onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); runText(); } }} />}
+        <div className="workspace-source-toolbar">
+          <div className="workspace-toolbar-group">
+            <button className={`workspace-icon ${isRecording ? 'is-recording' : ''}`} aria-label={isRecording ? 'Stop recording' : 'Start recording'} title={isRecording ? 'Stop recording' : 'Start recording'} disabled={!isRecording && (busy || inputMethod === 'image')} onClick={isRecording ? stopRecording : startRecording}><Mic size={19} /></button>
+            <button className="workspace-icon" aria-label={inputMethod === 'image' ? 'Text/Audio input' : 'Image input'} title={inputMethod === 'image' ? 'Text/Audio input' : 'Image input'} aria-pressed={inputMethod === 'image'} disabled={isRecording} onClick={() => { handleInputMethodChange(inputMethod === 'image' ? 'text' : 'image'); setTextMode('translation'); }} >{inputMethod === 'image' ? <Keyboard size={19} /> : <Camera size={19} />}</button>
+
+          </div>
+          <button className="workspace-primary" disabled={busy || isRecording || (inputMethod === 'image' ? !image : !sourceText.trim())} onClick={() => inputMethod === 'image' && image ? processImage(image) : runText()}>{busy ? <Loader2 size={16} className="animate-spin" /> : <ArrowRight size={17} />}{inputMethod === 'qa' ? 'Ask' : textMode === 'explanation' ? 'Explain' : 'Translate'}</button>
         </div>
-        <button
-          onClick={() => onOpenSettings()}
-          className="p-2 text-white/80 hover:text-white hover:bg-indigo-600 rounded-lg transition-all duration-200 btn-pop"
-          title="Settings"
-        >
-          <Settings className="w-5 h-5" />
-        </button>
-      </div>
-      {/* Language Selection */}
-      <div className="flex items-center justify-between p-3 bg-indigo-50 dark:bg-gray-700">
-        {(inputMethod === 'text' && textMode === 'explanation') || inputMethod === 'qa' ? (
-          // For explanation and Q/A: Only show target language
-          <div className="w-full flex items-center justify-center space-x-2">
-            <span className="text-sm text-gray-600 dark:text-gray-400">Target Language:</span>
-            <Select value={targetLang} onValueChange={(value) => setTargetLang(value as LanguageCode)}>
-              <SelectTrigger className="w-48 text-sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {languageOptions.map(lang => (
-                  <SelectItem key={`target-${lang.value}`} value={lang.value}>
-                    {lang.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        ) : (
-          // For translation and image: Show source and target
-          <>
-            <div className="flex-1">
-              <Select value={sourceLang} onValueChange={(value) => setSourceLang(value as LanguageCode)}>
-                <SelectTrigger className="w-full text-sm">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {languageOptions.map(lang => (
-                    <SelectItem key={`source-${lang.value}`} value={lang.value}>
-                      {lang.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <button id="swap-button" onClick={handleSwapLanguages} className="mx-2 p-2 bg-white dark:bg-gray-600 rounded-full shadow-md btn-pop">
-              <ArrowUpDown className="h-4 w-4 text-indigo-500 dark:text-white" />
-            </button>
-            <div className="flex-1">
-              <Select value={targetLang} onValueChange={(value) => setTargetLang(value as LanguageCode)}>
-                <SelectTrigger className="w-full text-sm">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {languageOptions.map(lang => (
-                    <SelectItem key={`target-${lang.value}`} value={lang.value}>
-                      {lang.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </>
-        )}
-      </div>
-      {/* Main Content Area */}
-      <div className="p-4">
-        {/* Source Input */}
-        <div className="relative">
-            {inputMethod === 'image' ? <div className="w-full h-32 rounded-2xl border border-indigo-100 dark:border-gray-600 bg-white dark:bg-gray-700 overflow-hidden static-shadow">
-                {image ? (
-                  <div className="relative w-full h-full">
-                    <img
-                      src={image}
-                      alt="Original"
-                      className="w-full h-full object-contain rounded"
-                    />
-                    {isProcessingImage && (
-                      <div className="absolute inset-0 flex items-center justify-center bg-black/30 rounded">
-                        <div className="animate-spin h-8 w-8 border-4 border-white border-t-transparent rounded-full"></div>
-                      </div>
-                    )}
-                    {!isProcessingImage && (
-                      <button
-                        onClick={() => {
-                          setImage(null);
-                          setTranslatedImage(null);
-                          setSourceText('');
-                          setTargetText('');
-                        }}
-                        className="absolute top-2 right-2 p-1.5 bg-red-500 text-white rounded-full shadow-md btn-pop"
-                        title="Remove image"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    )}
-                  </div>
-                ) : !isOCRConfigured() && !useVLMMode ? (
-                  // Show settings guidance when OCR is not configured
-                  <div className="w-full h-full flex flex-col items-center justify-center p-3 bg-indigo-500/10 dark:bg-indigo-500/20">
-                    <Settings className="h-8 w-8 text-indigo-600 dark:text-indigo-400 mb-2" />
-                    <p className="text-indigo-800 dark:text-indigo-200 text-center text-xs font-medium mb-3">
-                      OCR Service Not Configured
-                    </p>
-                    <button
-                      onClick={() => onOpenSettings('image')}
-                      className="px-3 py-1.5 bg-indigo-500 text-white text-xs rounded-lg cute-shadow hover:bg-indigo-400 transition-all duration-200"
-                    >
-                      Open Settings
-                    </button>
-                  </div>
-                ) : !isVLMConfigured() && useVLMMode ? (
-                  // Show settings guidance when VLM is not configured
-                  <div className="w-full h-full flex flex-col items-center justify-center p-3 bg-indigo-500/10 dark:bg-indigo-500/20">
-                    <Settings className="h-8 w-8 text-indigo-600 dark:text-indigo-400 mb-2" />
-                    <p className="text-indigo-800 dark:text-indigo-200 text-center text-xs font-medium mb-3">
-                      VLM Service Not Configured
-                    </p>
-                    <button
-                      onClick={() => onOpenSettings('general')}
-                      className="px-3 py-1.5 bg-indigo-500 text-white text-xs rounded-lg cute-shadow hover:bg-indigo-400 transition-all duration-200"
-                    >
-                      Open Settings
-                    </button>
-                  </div>
-                ) : (
-                  <div {...getRootProps()} className="w-full h-full flex flex-col items-center justify-center cursor-pointer p-2">
-                    <input {...getInputProps()} />
-                    <div className="mb-2 p-2 bg-indigo-100/50 dark:bg-indigo-900/30 rounded-xl" style={{ filter: 'drop-shadow(0 2px 4px rgba(99, 102, 241, 0.15))' }}>
-                      <ImageIcon className="h-6 w-6 text-indigo-500 dark:text-indigo-400" />
-                    </div>
-                    <p className="text-gray-600 dark:text-gray-300 text-center text-xs font-medium mb-1.5">
-                      Upload an Image
-                    </p>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setIsCameraOpen(true);
-                      }}
-                      className="px-3 py-1 bg-indigo-500 text-white text-xs font-medium rounded-lg cute-shadow hover:bg-indigo-400 transition-colors duration-200 flex items-center space-x-1.5"
-                    >
-                      <Camera className="h-3 w-3" />
-                      <span>Camera</span>
-                    </button>
-                  </div>
-                )}
-              </div> : <div className="relative">
-                {/* Check if Q/A requires General AI and show warning if not configured */}
-                {(inputMethod === 'qa' || (inputMethod === 'text' && textMode === 'explanation')) && !isGeneralAIConfigured() ? (
-                  <div className="w-full min-h-[8rem] rounded-2xl border border-indigo-100 dark:border-gray-600 bg-indigo-500/10 dark:bg-indigo-500/20 overflow-hidden static-shadow flex flex-col items-center justify-center p-4">
-                    <Settings className="h-8 w-8 text-indigo-600 dark:text-indigo-400 mb-2" />
-                    <p className="text-indigo-800 dark:text-indigo-200 text-center text-xs font-medium mb-3">
-                      {inputMethod === 'qa' ? 'Q&A Service Not Configured' : 'Explanation Service Not Configured'}
-                    </p>
-                    <button
-                      onClick={() => onOpenSettings('general')}
-                      className="px-3 py-1.5 bg-indigo-500 text-white text-xs rounded-lg cute-shadow hover:bg-indigo-400 transition-all duration-200"
-                    >
-                      Open Settings
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    {/* Textarea for text/audio input */}
-                    <textarea
-                      ref={textareaRef}
-                      value={sourceText + (interimTranscript && isRecording ? (sourceText ? ' ' : '') + interimTranscript : '')}
-                      onChange={handleTextChange}
-                      placeholder={isRecording
-                        ? 'Listening...'
-                        : inputMethod === 'qa'
-                        ? 'Ask a question (e.g., "How to ask for the check?")'
-                        : textMode === 'explanation'
-                        ? 'Enter text to explain (word/sentence/grammar)...'
-                        : `Type in ${languageOptions.find(l => l.value === sourceLang)?.label}...`
-                      }
-                      className="w-full min-h-[8rem] max-h-[12.5rem] p-3 pr-12 rounded-2xl border-2 border-indigo-100 dark:border-gray-600 focus:outline-none focus:border-indigo-300 dark:focus:border-indigo-400 dark:bg-gray-700 dark:text-gray-100 resize-none cute-shadow overflow-y-auto custom-scrollbar"
-                      style={{ height: 'auto' }}
-                      readOnly={isRecording}
-                    />
-                {/* Audio recording button (visible in text mode, hidden in Q/A) */}
-                {inputMethod !== 'qa' && (
-                  <div className="absolute right-2 bottom-3">
-                    {isRecording ? (
-                      <button
-                        onClick={stopRecording}
-                        className="p-2 bg-red-500 text-white rounded-full shadow-md btn-pop flex items-center justify-center w-8 h-8"
-                        title="Stop recording"
-                      >
-                        <div className="w-3 h-3 bg-white rounded-sm"></div>
-                      </button>
-                    ) : (
-                      <button
-                        onClick={startRecording}
-                        className="p-2 bg-indigo-500 text-white rounded-full shadow-md btn-pop flex items-center justify-center w-8 h-8"
-                        title="Start recording"
-                      >
-                        <Mic className="h-4 w-4" />
-                      </button>
-                    )}
-                  </div>
-                )}
-              </>
-            )}
-              </div>}
-            {/* Input Method Controls */}
-            <div className="flex items-center justify-center mt-3 space-x-2">
-              <button onClick={() => handleInputMethodChange('text')} className={`p-2 rounded-xl ${inputMethod === 'text' ? 'bg-indigo-500 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'} btn-pop`} title="Text/Audio input">
-                <Keyboard className="h-4 w-4" />
-              </button>
-              <button onClick={() => handleInputMethodChange('image')} className={`p-2 rounded-xl ${inputMethod === 'image' ? 'bg-indigo-500 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'} btn-pop`} title="Image input">
-                <Camera className="h-4 w-4" />
-              </button>
-              <button onClick={() => handleInputMethodChange('qa')} className={`p-2 rounded-xl ${inputMethod === 'qa' ? 'bg-indigo-500 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'} btn-pop`} title="Quick Q&A">
-                <MessageCircle className="h-4 w-4" />
-              </button>
-            </div>
-            {/* Translation Result */}
-            <div className="mt-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">
-                  {inputMethod === 'qa'
-                    ? 'Answer'
-                    : textMode === 'explanation'
-                    ? 'Explanation'
-                    : `${languageOptions.find(l => l.value === targetLang)?.label} Translation`}
-                </h3>
-                <div className="flex items-center space-x-2">
-                  {inputMethod === 'text' && (
-                    <button
-                      onClick={() => {
-                        const newMode = textMode === 'translation' ? 'explanation' : 'translation';
-                        setTextMode(newMode);
-                        // Clear output when changing mode
-                        setTargetText('');
-                        // Cancel any ongoing request
-                        if (textMode === 'translation' && translationAbortControllerRef.current) {
-                          translationAbortControllerRef.current.abort();
-                          translationAbortControllerRef.current = null;
-                        } else if (textMode === 'explanation' && explanationAbortControllerRef.current) {
-                          explanationAbortControllerRef.current.abort();
-                          explanationAbortControllerRef.current = null;
-                        }
-                        // Trigger new request with new mode if there's text
-                        if (sourceText.trim()) {
-                          if (newMode === 'explanation') {
-                            handleWordExplanation(sourceText, sourceLang, targetLang);
-                          } else {
-                            handleTranslate(sourceText, sourceLang, targetLang);
-                          }
-                        }
-                      }}
-                      className={`px-2 py-1 text-xs rounded-lg transition-all duration-200 ${
-                        textMode === 'explanation'
-                          ? 'bg-indigo-500 text-white'
-                          : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
-                      }`}
-                      title={textMode === 'explanation' ? 'Switch to Translation' : 'Switch to Explanation'}
-                    >
-                      {textMode === 'explanation' ? 'Explanation' : 'Translation'}
-                    </button>
-                  )}
-                  {inputMethod === 'image' && (
-                    <button
-                      onClick={() => {
-                        const newMode = !useVLMMode;
-                        setUseVLMMode(newMode);
-                        // Clear output when changing mode
-                        setTargetText('');
-                        setTranslatedImage(null);
-                        // Cancel any ongoing request
-                        if (imageAbortControllerRef.current) {
-                          imageAbortControllerRef.current.abort();
-                          imageAbortControllerRef.current = null;
-                        }
-                        // Trigger new request with new mode if there's an image
-                        if (image) {
-                          processImage(image);
-                        }
-                      }}
-                      className={`px-2 py-1 text-xs rounded-lg transition-all duration-200 ${
-                        useVLMMode
-                          ? 'bg-indigo-500 text-white'
-                          : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
-                      }`}
-                      title={useVLMMode ? 'Switch to OCR mode' : 'Switch to VLM mode'}
-                    >
-                      {useVLMMode ? 'VLM' : 'OCR'}
-                    </button>
-                  )}
-                  {targetText && (
-                    <div className="flex space-x-2">
-                    <button
-                      onClick={() => speakText(targetText, targetLang)}
-                      className="p-1.5 bg-gray-100 dark:bg-gray-700 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors btn-pop"
-                      title="Play audio"
-                    >
-                      <Volume2 className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      onClick={copyToClipboard}
-                      className="p-1.5 bg-gray-100 dark:bg-gray-700 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors btn-pop"
-                      title="Copy to clipboard"
-                    >
-                      {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
-                    </button>
-                  </div>
-                  )}
-                </div>
-              </div>
-              <div className="mt-2 p-3 min-h-[8rem] max-h-[24rem] bg-indigo-50 dark:bg-gray-700 rounded-2xl cute-shadow overflow-y-auto custom-scrollbar" ref={targetInputRef}>
-                {isTranslating && !targetText ? <div className="flex items-center justify-center py-4 min-h-[7rem]">
-                    <div className="flex space-x-1">
-                      <div className="w-2 h-2 bg-indigo-500 dark:bg-indigo-400 rounded-full animate-bounce" style={{
-                  animationDelay: '0ms'
-                }}></div>
-                      <div className="w-2 h-2 bg-indigo-500 dark:bg-indigo-400 rounded-full animate-bounce" style={{
-                  animationDelay: '150ms'
-                }}></div>
-                      <div className="w-2 h-2 bg-indigo-500 dark:bg-indigo-400 rounded-full animate-bounce" style={{
-                  animationDelay: '300ms'
-                }}></div>
-                    </div>
-                  </div> : error ? <p className="text-red-500 dark:text-red-400 text-center py-6 text-sm min-h-[7rem] flex items-center justify-center">
-                    {error}
-                  </p> : translatedImage && !useVLMMode ? (
-                    <div className="w-full">
-                      <img
-                        src={translatedImage}
-                        alt="Translated"
-                        className="w-full rounded cursor-pointer"
-                        onClick={() => setIsLightboxOpen(true)}
-                      />
-                    </div>
-                  ) : targetText ? (
-                    <div className="w-full">
-                      {/* Thinking indicator */}
-                      {isThinking && (
-                        <div className="mb-2 flex items-center space-x-2 text-xs text-amber-600 dark:text-amber-400">
-                          <div className="flex space-x-1">
-                            <div className="w-1.5 h-1.5 bg-amber-500 dark:bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                            <div className="w-1.5 h-1.5 bg-amber-500 dark:bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                            <div className="w-1.5 h-1.5 bg-amber-500 dark:bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-                          </div>
-                          <span className="font-medium">Thinking...</span>
-                        </div>
-                      )}
-                      {useVLMMode || inputMethod === 'qa' || textMode === 'explanation' ? (
-                        // VLM mode / Q&A / Explanation: Render as markdown
-                        <div
-                          className="text-gray-800 dark:text-gray-200 w-full leading-relaxed prose dark:prose-invert prose-sm max-w-none"
-                          dangerouslySetInnerHTML={{ __html: parsedMarkdown }}
-                        />
-                      ) : furiganaHtml ? (
-                      <div
-                        className="text-gray-800 dark:text-gray-200 w-full leading-relaxed whitespace-pre-wrap"
-                        dangerouslySetInnerHTML={{ __html: furiganaHtml }}
-                      />
-                      ) : (
-                        <p className="text-gray-800 dark:text-gray-200 w-full whitespace-pre-wrap">
-                          {targetText}
-                        </p>
-                      )}
-                    </div>
-                  ) : <p className="text-gray-400 dark:text-gray-500 text-center py-6 min-h-[7rem] flex items-center justify-center">
-                    {inputMethod === 'qa'
-                      ? 'Ask a question and get a quick answer'
-                      : textMode === 'explanation'
-                      ? 'Enter text to see its explanation'
-                      : 'Translation will appear here'}
-                  </p>}
-              </div>
-            </div>
-          </div>
-      </div>
-
-      {/* Camera Panel - Lazy Loaded */}
-      <Suspense fallback={null}>
-        <CameraPanel
-          isOpen={isCameraOpen}
-          onClose={() => setIsCameraOpen(false)}
-          onCapture={handleCameraCapture}
-        />
-      </Suspense>
-
-      {/* Image Lightbox */}
-      <ImageLightbox
-        isOpen={isLightboxOpen}
-        imageUrl={translatedImage}
-        onClose={() => setIsLightboxOpen(false)}
-      />
-    </div>;
+        {inputMethod === 'image' && <div className="workspace-image-modes"><button aria-pressed={!useVLMMode} onClick={() => { setUseVLMMode(false); if (image) void processImage(image, false); }}>OCR text{!settings.imageOCR.useGeneralAI && settings.imageOCR.provider !== 'custom' ? ' + overlay' : ''}</button><button aria-pressed={useVLMMode} onClick={() => { setUseVLMMode(true); if (image) void processImage(image, true); }}>Vision translation</button></div>}
+      </section>
+      <section className="workspace-result" aria-label={resultTitle} aria-busy={busy}>
+        <div className="workspace-panel-heading"><h2><Sparkles size={17} />{resultTitle}</h2><span>{SUPPORTED_LANGUAGES[targetLang]}</span></div>
+        <div className="workspace-result-body custom-scrollbar" ref={targetInputRef}>
+          {busy && !targetText ? <div role="status" className="workspace-empty"><Loader2 size={26} className="animate-spin" /><strong>{isProcessingImage ? 'Reading your photo…' : 'Finding the right words…'}</strong></div>
+          : error ? <div role="alert" className="workspace-empty workspace-error"><p>{error}</p><button className="workspace-secondary" onClick={() => onOpenSettings(inputMethod === 'image' ? 'image' : 'general')}>Open Settings</button></div>
+          : translatedImage && !useVLMMode ? <img src={translatedImage} alt="Translated" className="workspace-translated-image" onClick={() => setIsLightboxOpen(true)} />
+          : targetText ? <>{isThinking && <p className="workspace-thinking" role="status">Thinking…</p>}{useVLMMode || assistantMode ? <div className="prose dark:prose-invert prose-sm max-w-none"><ReactMarkdown remarkPlugins={[remarkGfm]}>{targetText}</ReactMarkdown></div> : furiganaHtml ? <div className="whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: furiganaHtml }} /> : <p className="whitespace-pre-wrap">{targetText}</p>}</>
+          : <div className="workspace-empty"><div className="workspace-empty-icon"><Sparkles size={25} strokeWidth={1.5} /></div><strong>{inputMethod === 'qa' ? 'A little local knowledge.' : textMode === 'explanation' ? 'Make sense of something new.' : 'Good conversations start here.'}</strong><p>{inputMethod === 'qa' ? 'Ask a question and get a quick answer' : textMode === 'explanation' ? 'Enter text to see its explanation' : 'Translation will appear here'}</p>{!isGeneralAIConfigured() && !(hasProviderConnection(settings)) && <button className="workspace-secondary" onClick={() => onOpenSettings('general')}>Connect your AI <ArrowRight size={15} /></button>}</div>}
+        </div>
+        <div className="workspace-result-toolbar"><span>{copied ? 'Copied to clipboard' : targetText ? 'Ready for your next conversation' : 'Your words, a little closer.'}</span><div className="workspace-toolbar-group"><button className="workspace-icon" disabled={!targetText} aria-label="Play audio" title="Play audio" onClick={() => speakText(targetText, targetLang)}><Volume2 size={18} /></button><button className="workspace-icon" disabled={!targetText} aria-label="Copy to clipboard" title="Copy to clipboard" onClick={copyToClipboard}>{copied ? <Check size={18} /> : <Copy size={18} />}</button></div></div>
+      </section>
+    </div>
+    <footer className="workspace-footer"><span>Text · Voice · Photos</span><span>Made for the moments in between.</span></footer>
+    <Suspense fallback={null}><CameraPanel isOpen={isCameraOpen} onClose={() => setIsCameraOpen(false)} onCapture={handleCameraCapture} /></Suspense>
+    <ImageLightbox isOpen={isLightboxOpen} imageUrl={translatedImage} onClose={() => setIsLightboxOpen(false)} />
+  </main>;
 };

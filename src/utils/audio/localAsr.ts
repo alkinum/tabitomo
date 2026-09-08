@@ -24,6 +24,7 @@ export interface LocalAsrTranscriptionOptions {
 type AudioContextConstructor = typeof AudioContext;
 
 interface AudioWindow extends Window {
+  AudioContext: typeof AudioContext;
   webkitAudioContext?: AudioContextConstructor;
 }
 

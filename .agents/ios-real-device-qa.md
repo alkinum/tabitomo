@@ -44,7 +44,7 @@ The `iCloud settings` check saves the current normalized settings through the pr
 
 The Device QA surface also includes a `Model pack` storage check. It creates a tiny in-memory model-pack manifest/file, installs it through the same staging/activation/metadata path used by manifest URL installs, verifies persisted metadata and installed files, confirms staging artifacts are cleaned up, deletes the tiny pack, restores the previous installed-pack metadata, and records only pack id/byte details.
 
-The `Local ASR model` check requires the selected fixed Whisper or SenseVoice model to be downloaded, loads it through sherpa-onnx, and runs a local WAV through inference. The `PP-OCR model` check requires PP-OCR v5 Mobile plus a captured/imported device image, loads detector/recognizer/dictionary files through ONNX Runtime, and runs inference. Reports record only model/runtime IDs, transcript length or line count, and timing; they omit media, local URIs, and recognized content.
+The `Local ASR model` check requires the selected fixed Whisper or SenseVoice model to be downloaded, loads it through sherpa-onnx, and runs a local WAV through inference. The `PP-OCR model` check requires PP-OCR v6 Small plus a captured/imported device image, loads detector/recognizer/dictionary files through ONNX Runtime, and runs inference. Reports record only model/runtime IDs, transcript length or line count, and timing; they omit media, local URIs, and recognized content.
 
 The Device QA surface includes a `Provider text` check for real credential runs on device. It uses the current saved settings to run Translation, streaming Explanation, streaming Quick Q&A, and provider-backed Japanese furigana through shared core with per-step timeouts. The report records only pass/fail metadata and compact output lengths/tokens; provider credentials, endpoints, imported config payloads, response bodies, and local image/file URIs must stay omitted.
 
@@ -68,7 +68,7 @@ Each check record must include:
 | Provider image | Configure real VLM and cloud OCR settings, then run Device QA Provider image | VLM, OCR, and OCR-line translation pass on the generated CAFE image; report includes timings/counts/lengths but no API keys, endpoints, response bodies, image data URL, or local image URIs | Pending |
 | Provider speech | Configure real cloud ASR settings, then run Device QA Provider speech | Synthetic WAV upload reaches the ASR provider; report includes provider type/timing/transcript length but no transcript text, API keys, endpoints, response bodies, or local audio URI | Pending |
 | Local ASR model | Download the selected Whisper/SenseVoice model, run Device QA Local ASR model, repeat in airplane mode and after relaunch | sherpa-onnx inference completes from downloaded files; report contains only model/runtime, transcript length, and timing | Pending |
-| PP-OCR model | Download PP-OCR v5, capture/import a real image, run Device QA PP-OCR model, repeat in airplane mode and after relaunch | ONNX Runtime inference completes; report contains only model/runtime, line count, and timing; inspect rotation/alignment separately | Pending |
+| PP-OCR model | Download PP-OCR v6 Small, capture/import a real image, run Device QA PP-OCR model, repeat in airplane mode and after relaunch | ONNX Runtime inference completes; report contains only model/runtime, line count, and timing; inspect rotation/alignment separately | Pending |
 | Model pack storage | Run Device QA Model pack, then inspect Local models status | Tiny pack install/delete check passes; metadata is restored; no staging/previous artifacts remain; report does not expose local file URIs | Pending |
 | Import setup | Import encrypted `.ttconfig` from file | Settings populate, save, and persist after relaunch | Pending |
 | QR import | Scan encrypted settings QR from another screen | Payload imports or shows a clear password/config error | Pending |
@@ -79,7 +79,7 @@ Each check record must include:
 | On-device ASR fallback | Remove or invalidate the selected downloaded ASR model, then run a supported locale | Uses Apple on-device Speech only as fallback or gives a clear download/unsupported-locale error | Pending |
 | Camera capture | Capture a real image from main Camera and Device QA Capture | Image preview appears and can be processed | Pending |
 | Photo import | Import the prepared image from Photos | Image preview appears and can be processed | Pending |
-| Vision OCR fallback | Remove PP-OCR v5 and run local OCR on a prepared image | Apple Vision is used as fallback and OCR overlay labels align acceptably | Pending |
+| Vision OCR fallback | Remove PP-OCR v6 Small and run local OCR on a prepared image | Apple Vision is used as fallback and OCR overlay labels align acceptably | Pending |
 | Cloud OCR | Select cloud OCR and process prepared image | Source text and translated overlay/result populate | Pending |
 | VLM | Select VLM mode and process prepared image | Streaming markdown result appears without raw protocol/thinking noise | Pending |
 | Share sheet | Export `.ttconfig` via Share file and Device QA Share | Native share sheet opens and file is readable elsewhere | Pending |

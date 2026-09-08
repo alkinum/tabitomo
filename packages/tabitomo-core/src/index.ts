@@ -9,3 +9,7 @@ export * from './configExport';
 export * from './japanese';
 export * from './modelPacks';
 export * from './settingsSync';
+
+export * from './designTokens';
+export * from './connections';
+export * from './inputOptions';

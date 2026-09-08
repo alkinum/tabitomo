@@ -47,12 +47,13 @@ export async function transcribeWithNativeLocalModelAsync(
 
 export async function recognizeTextWithNativePPOCRAsync(
   imageUri: string,
+  modelId: 'ppocr-v6-small',
   modelRootUri: string
 ): Promise<NativeLocalOCRResult> {
   if (!TabitomoNativeLocalModelsModule) {
     throw new Error('Native PP-OCR runtime is not available in this build.');
   }
-  return TabitomoNativeLocalModelsModule.recognizeTextAsync(imageUri, modelRootUri);
+  return TabitomoNativeLocalModelsModule.recognizeTextAsync(imageUri, modelId, modelRootUri);
 }
 
 export async function unloadNativeLocalModelAsync(

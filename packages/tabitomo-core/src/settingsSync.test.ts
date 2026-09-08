@@ -16,7 +16,7 @@ test('settings sync migrates a legacy whole-settings snapshot', () => {
   }, 12);
 
   assert.ok(snapshot);
-  assert.equal(snapshot.settings.generalAI.modelName, 'gpt-5.6-terra');
+  assert.equal(snapshot.settings.generalAI.modelName, DEFAULT_SETTINGS.generalAI.modelName);
   assert.equal(snapshot.groups.generalAI.updatedAt, 12);
   assert.equal(snapshot.groups.imageOCR.updatedAt, 12);
 });

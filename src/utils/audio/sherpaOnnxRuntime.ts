@@ -38,6 +38,7 @@ type OfflineRecognizer = {
 type OfflineRecognizerConstructor = new (config: SherpaOfflineRecognizerConfig, module: SherpaModule) => OfflineRecognizer;
 
 interface SherpaWindow extends Window {
+  AudioContext: typeof AudioContext;
   Module?: SherpaModule;
   OfflineRecognizer?: OfflineRecognizerConstructor;
   webkitAudioContext?: typeof AudioContext;
@@ -350,7 +351,8 @@ const loadSherpaModule = (paths: SherpaModelPaths): Promise<SherpaModule> => {
         }
         resolve(module);
       },
-    } as SherpaModule;
+    // Emscripten adds native exports before onRuntimeInitialized runs.
+    } as unknown as SherpaModule;
 
     loadScript(paths.wasmJs, true).catch((error) => {
       window.clearTimeout(timeoutId);

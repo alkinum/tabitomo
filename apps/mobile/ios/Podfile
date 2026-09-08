@@ -63,5 +63,15 @@ target 'tabitomo' do
       :mac_catalyst_enabled => false,
       :ccache_enabled => ccache_enabled?(podfile_properties),
     )
+    # tabitomo-ios-floor: dependency resources must support the app's minimum iOS.
+    minimum_ios = podfile_properties['ios.deploymentTarget'] || '16.4'
+    installer.pods_project.targets.each do |target|
+      target.build_configurations.each do |build_config|
+        current_ios = build_config.build_settings['IPHONEOS_DEPLOYMENT_TARGET']
+        if current_ios && current_ios.match?(/^[0-9]/) && Gem::Version.new(current_ios) < Gem::Version.new(minimum_ios)
+          build_config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = minimum_ios
+        end
+      end
+    end
   end
 end

@@ -5,6 +5,7 @@ import ReactAppDependencyProvider
 @main
 class AppDelegate: ExpoAppDelegate {
   var window: UIWindow?
+  var reactLaunchOptions: [UIApplication.LaunchOptionsKey: Any]?
 
   var reactNativeDelegate: ExpoReactNativeFactoryDelegate?
   var reactNativeFactory: RCTReactNativeFactory?
@@ -20,13 +21,7 @@ class AppDelegate: ExpoAppDelegate {
     reactNativeDelegate = delegate
     reactNativeFactory = factory
 
-#if os(iOS) || os(tvOS)
-    window = UIWindow(frame: UIScreen.main.bounds)
-    factory.startReactNative(
-      withModuleName: "main",
-      in: window,
-      launchOptions: launchOptions)
-#endif
+    reactLaunchOptions = launchOptions
 
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
@@ -65,5 +60,42 @@ class ReactNativeDelegate: ExpoReactNativeFactoryDelegate {
 #else
     return Bundle.main.url(forResource: "main", withExtension: "jsbundle")
 #endif
+  }
+}
+
+
+@objc(TabitomoSceneDelegate)
+class TabitomoSceneDelegate: UIResponder, UIWindowSceneDelegate {
+  var window: UIWindow?
+
+  func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
+    guard let windowScene = scene as? UIWindowScene,
+          let appDelegate = UIApplication.shared.delegate as? AppDelegate else { return }
+    let window = UIWindow(windowScene: windowScene)
+    self.window = window
+    appDelegate.window = window
+    var launchOptions = appDelegate.reactLaunchOptions ?? [:]
+    if let url = connectionOptions.urlContexts.first?.url {
+      launchOptions[.url] = url
+    }
+    if let activity = connectionOptions.userActivities.first {
+      launchOptions[.userActivityDictionary] = ["UIApplicationLaunchOptionsUserActivityKey": activity]
+    }
+    appDelegate.reactNativeFactory?.startReactNative(withModuleName: "main", in: window, launchOptions: launchOptions)
+  }
+
+  func scene(_ scene: UIScene, openURLContexts contexts: Set<UIOpenURLContext>) {
+    guard let delegate = UIApplication.shared.delegate as? AppDelegate else { return }
+    for context in contexts {
+      var options: [UIApplication.OpenURLOptionsKey: Any] = [.openInPlace: context.options.openInPlace]
+      if let source = context.options.sourceApplication { options[.sourceApplication] = source }
+      if let annotation = context.options.annotation { options[.annotation] = annotation }
+      _ = delegate.application(UIApplication.shared, open: context.url, options: options)
+    }
+  }
+
+  func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {
+    guard let delegate = UIApplication.shared.delegate as? AppDelegate else { return }
+    _ = delegate.application(UIApplication.shared, continue: userActivity, restorationHandler: { _ in })
   }
 }

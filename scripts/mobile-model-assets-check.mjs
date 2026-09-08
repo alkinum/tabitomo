@@ -13,7 +13,7 @@ const MODELS = [
     requiredFiles: ['model.int8.onnx', 'tokens.txt'],
   },
   {
-    id: 'ppocr-v5-mobile',
+    id: 'ppocr-v6-small',
     feature: 'ocr',
     runtime: 'onnxruntime-mobile',
     requiredFiles: ['det.onnx', 'rec.onnx', 'dict.txt'],

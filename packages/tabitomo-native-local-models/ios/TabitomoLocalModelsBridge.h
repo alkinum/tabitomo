@@ -20,6 +20,7 @@ NS_ASSUME_NONNULL_BEGIN
                                        error:(NSError **)error;
 
 + (nullable NSArray<NSDictionary<NSString *, id> *> *)recognizeTextAtPath:(NSString *)imagePath
+                                                                   modelId:(NSString *)modelId
                                                                   rootPath:(NSString *)rootPath
                                                                      error:(NSError **)error;
 

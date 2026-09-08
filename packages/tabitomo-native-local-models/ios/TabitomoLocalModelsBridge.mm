@@ -191,12 +191,37 @@ struct TextBox {
   float score = 0;
 };
 
+struct OcrModelConfig {
+  float detectorThreshold;
+  float detectorBoxThreshold;
+  float detectorUnclipRatio;
+  int detectorMaxCandidates;
+  int recognizerHeight;
+  int recognizerBaseWidth;
+  int recognizerMaxWidth;
+};
+
+const OcrModelConfig &OcrConfigForModel(const std::string &modelId) {
+  static const OcrModelConfig ppocrV6Small{
+      0.2f,
+      0.45f,
+      1.4f,
+      3000,
+      48,
+      320,
+      3200,
+  };
+  if (modelId == "ppocr-v6-small") return ppocrV6Small;
+  throw std::runtime_error("Unsupported PP-OCR model: " + modelId);
+}
+
 Ort::Env &OrtEnvironment() {
   static Ort::Env environment(ORT_LOGGING_LEVEL_WARNING, "tabitomo-local-models");
   return environment;
 }
 
 struct OcrSessions {
+  OcrModelConfig config;
   Ort::Session detector;
   Ort::Session recognizer;
   std::string detectorInput;
@@ -205,8 +230,9 @@ struct OcrSessions {
   std::string recognizerOutput;
   std::vector<std::string> characters;
 
-  explicit OcrSessions(const std::string &root)
-      : detector(OrtEnvironment(), RequiredFile(root, "det.onnx").c_str(), SessionOptions()),
+  explicit OcrSessions(const std::string &modelId, const std::string &root)
+      : config(OcrConfigForModel(modelId)),
+        detector(OrtEnvironment(), RequiredFile(root, "det.onnx").c_str(), SessionOptions()),
         recognizer(OrtEnvironment(), RequiredFile(root, "rec.onnx").c_str(), SessionOptions()) {
     Ort::AllocatorWithDefaultOptions allocator;
     detectorInput = detector.GetInputNameAllocated(0, allocator).get();
@@ -234,13 +260,14 @@ struct OcrSessions {
 };
 
 std::mutex gOcrMutex;
-std::string gOcrRoot;
+std::string gOcrKey;
 std::unique_ptr<OcrSessions> gOcrSessions;
 
-OcrSessions *GetOcrSessions(const std::string &root) {
-  if (gOcrSessions == nullptr || gOcrRoot != root) {
-    gOcrSessions = std::make_unique<OcrSessions>(root);
-    gOcrRoot = root;
+OcrSessions *GetOcrSessions(const std::string &modelId, const std::string &root) {
+  const std::string key = modelId + "\n" + root;
+  if (gOcrSessions == nullptr || gOcrKey != key) {
+    gOcrSessions = std::make_unique<OcrSessions>(modelId, root);
+    gOcrKey = key;
   }
   return gOcrSessions.get();
 }
@@ -269,20 +296,26 @@ std::vector<float> DetectorInput(const ImagePixels &image, int &targetWidth, int
   return input;
 }
 
-std::vector<TextBox> DetectorBoxes(const float *scores, int mapWidth, int mapHeight, int imageWidth, int imageHeight) {
+std::vector<TextBox> DetectorBoxes(
+    const float *scores,
+    int mapWidth,
+    int mapHeight,
+    int imageWidth,
+    int imageHeight,
+    const OcrModelConfig &config) {
   const size_t count = static_cast<size_t>(mapWidth) * mapHeight;
   std::vector<uint8_t> visited(count, 0);
   std::vector<TextBox> boxes;
   std::vector<int> pending;
   pending.reserve(4096);
-  constexpr float threshold = 0.3f;
-  constexpr float boxThreshold = 0.6f;
   const int neighbors[8][2] = {{-1,-1},{0,-1},{1,-1},{-1,0},{1,0},{-1,1},{0,1},{1,1}};
+  int candidateCount = 0;
 
   for (int y = 0; y < mapHeight; ++y) {
     for (int x = 0; x < mapWidth; ++x) {
       const int start = y * mapWidth + x;
-      if (visited[start] || scores[start] < threshold) continue;
+      if (visited[start] || scores[start] < config.detectorThreshold) continue;
+      if (++candidateCount > config.detectorMaxCandidates) break;
       pending.clear();
       pending.push_back(start);
       visited[start] = 1;
@@ -304,7 +337,7 @@ std::vector<TextBox> DetectorBoxes(const float *scores, int mapWidth, int mapHei
           const int nextY = currentY + neighbor[1];
           if (nextX < 0 || nextY < 0 || nextX >= mapWidth || nextY >= mapHeight) continue;
           const int next = nextY * mapWidth + nextX;
-          if (!visited[next] && scores[next] >= threshold) {
+          if (!visited[next] && scores[next] >= config.detectorThreshold) {
             visited[next] = 1;
             pending.push_back(next);
           }
@@ -312,19 +345,23 @@ std::vector<TextBox> DetectorBoxes(const float *scores, int mapWidth, int mapHei
       }
 
       const float average = pixels == 0 ? 0 : static_cast<float>(scoreSum / pixels);
-      if (pixels < 4 || average < boxThreshold) continue;
+      if (pixels < 4 || average < config.detectorBoxThreshold) continue;
       const float scaleX = static_cast<float>(imageWidth) / mapWidth;
       const float scaleY = static_cast<float>(imageHeight) / mapHeight;
       float left = minX * scaleX;
       float top = minY * scaleY;
       float right = (maxX + 1) * scaleX;
       float bottom = (maxY + 1) * scaleY;
-      const float padX = std::max(2.0f, (right - left) * 0.08f);
-      const float padY = std::max(2.0f, (bottom - top) * 0.18f);
-      left = std::max(0.0f, left - padX);
-      top = std::max(0.0f, top - padY);
-      right = std::min(static_cast<float>(imageWidth), right + padX);
-      bottom = std::min(static_cast<float>(imageHeight), bottom + padY);
+      const float width = right - left;
+      const float height = bottom - top;
+      const float perimeter = 2.0f * (width + height);
+      const float unclip = perimeter > 0
+          ? width * height * config.detectorUnclipRatio / perimeter
+          : 0.0f;
+      left = std::max(0.0f, left - std::max(2.0f, unclip));
+      top = std::max(0.0f, top - std::max(2.0f, unclip));
+      right = std::min(static_cast<float>(imageWidth), right + std::max(2.0f, unclip));
+      bottom = std::min(static_cast<float>(imageHeight), bottom + std::max(2.0f, unclip));
       if (right - left < 4 || bottom - top < 4) continue;
       boxes.push_back({left, top, right - left, bottom - top, average});
     }
@@ -339,10 +376,16 @@ std::vector<TextBox> DetectorBoxes(const float *scores, int mapWidth, int mapHei
   return boxes;
 }
 
-std::vector<float> RecognizerInput(const ImagePixels &image, const TextBox &box) {
-  constexpr int targetHeight = 48;
-  constexpr int targetWidth = 320;
+std::vector<float> RecognizerInput(
+    const ImagePixels &image,
+    const TextBox &box,
+    const OcrModelConfig &config,
+    int &targetWidth) {
+  const int targetHeight = config.recognizerHeight;
   const float aspect = box.width / std::max(1.0f, box.height);
+  targetWidth = std::min(
+      config.recognizerMaxWidth,
+      std::max(config.recognizerBaseWidth, static_cast<int>(std::ceil(targetHeight * aspect))));
   const int contentWidth = std::min(targetWidth, std::max(8, static_cast<int>(std::ceil(targetHeight * aspect))));
   std::vector<float> input(static_cast<size_t>(3) * targetHeight * targetWidth, 0.0f);
 
@@ -421,12 +464,19 @@ std::vector<std::pair<TextBox, Recognition>> RunOcr(const ImagePixels &image, Oc
   if (detOutputShape.size() < 3) throw std::runtime_error("PP-OCR detector returned an unsupported output shape.");
   const int mapHeight = static_cast<int>(detOutputShape[detOutputShape.size() - 2]);
   const int mapWidth = static_cast<int>(detOutputShape[detOutputShape.size() - 1]);
-  auto boxes = DetectorBoxes(detOutputs[0].GetTensorData<float>(), mapWidth, mapHeight, image.width, image.height);
+  auto boxes = DetectorBoxes(
+      detOutputs[0].GetTensorData<float>(),
+      mapWidth,
+      mapHeight,
+      image.width,
+      image.height,
+      sessions.config);
 
   std::vector<std::pair<TextBox, Recognition>> results;
   for (const TextBox &box : boxes) {
-    std::vector<float> recInput = RecognizerInput(image, box);
-    std::array<int64_t, 4> recShape = {1, 3, 48, 320};
+    int recWidth = sessions.config.recognizerBaseWidth;
+    std::vector<float> recInput = RecognizerInput(image, box, sessions.config, recWidth);
+    std::array<int64_t, 4> recShape = {1, 3, sessions.config.recognizerHeight, recWidth};
     Ort::Value recTensor = Ort::Value::CreateTensor<float>(
         memory, recInput.data(), recInput.size(), recShape.data(), recShape.size());
     const char *recInputNames[] = {sessions.recognizerInput.c_str()};
@@ -456,9 +506,9 @@ std::vector<std::pair<TextBox, Recognition>> RunOcr(const ImagePixels &image, Oc
   try {
     const std::string id = StdString(modelId);
     const std::string root = StdString(rootPath);
-    if (id == "ppocr-v5-mobile") {
+    if (id == "ppocr-v6-small") {
       std::lock_guard<std::mutex> lock(gOcrMutex);
-      (void)GetOcrSessions(root);
+      (void)GetOcrSessions(id, root);
     } else {
       std::lock_guard<std::mutex> lock(gAsrMutex);
       (void)GetAsrRecognizer(id, root, "auto", "transcribe", true);
@@ -509,12 +559,13 @@ std::vector<std::pair<TextBox, Recognition>> RunOcr(const ImagePixels &image, Oc
 }
 
 + (NSArray<NSDictionary<NSString *, id> *> *)recognizeTextAtPath:(NSString *)imagePath
+                                                         modelId:(NSString *)modelId
                                                          rootPath:(NSString *)rootPath
                                                             error:(NSError **)error {
   try {
     ImagePixels image = LoadImagePixels(imagePath);
     std::lock_guard<std::mutex> lock(gOcrMutex);
-    OcrSessions *sessions = GetOcrSessions(StdString(rootPath));
+    OcrSessions *sessions = GetOcrSessions(StdString(modelId), StdString(rootPath));
     auto results = RunOcr(image, *sessions);
     NSMutableArray<NSDictionary<NSString *, id> *> *items = [NSMutableArray arrayWithCapacity:results.size()];
     for (const auto &entry : results) {
@@ -545,11 +596,11 @@ std::vector<std::pair<TextBox, Recognition>> RunOcr(const ImagePixels &image, Oc
 + (void)unloadModel:(NSString *)modelId rootPath:(NSString *)rootPath {
   const std::string id = StdString(modelId);
   const std::string root = StdString(rootPath);
-  if (id == "ppocr-v5-mobile") {
+  if (id == "ppocr-v6-small") {
     std::lock_guard<std::mutex> lock(gOcrMutex);
-    if (gOcrRoot == root) {
+    if (gOcrKey == id + "\n" + root) {
       gOcrSessions.reset();
-      gOcrRoot.clear();
+      gOcrKey.clear();
     }
   } else {
     std::lock_guard<std::mutex> lock(gAsrMutex);

@@ -15,7 +15,7 @@ public final class TabitomoNativeLocalModelsModule: Module {
           try self.validateModel(modelId: modelId, rootPath: try self.filePath(modelRootUri))
           promise.resolve([
             "modelId": modelId,
-            "runtime": modelId == "ppocr-v5-mobile" ? "onnxruntime-mobile" : "sherpa-onnx-ios",
+            "runtime": modelId == "ppocr-v6-small" ? "onnxruntime-mobile" : "sherpa-onnx-ios",
             "valid": true,
           ])
         } catch {
@@ -56,7 +56,7 @@ public final class TabitomoNativeLocalModelsModule: Module {
       }
     }
 
-    AsyncFunction("recognizeTextAsync") { (imageUri: String, modelRootUri: String, promise: Promise) in
+    AsyncFunction("recognizeTextAsync") { (imageUri: String, modelId: String, modelRootUri: String, promise: Promise) in
       DispatchQueue.global(qos: .userInitiated).async {
         let startedAt = Date()
         do {
@@ -64,12 +64,13 @@ public final class TabitomoNativeLocalModelsModule: Module {
           let rootPath = try self.filePath(modelRootUri)
           let items = try TabitomoLocalModelsBridge.recognizeText(
             atPath: imagePath,
+            modelId: modelId,
             rootPath: rootPath
           )
           promise.resolve([
             "items": items,
             "runtime": "onnxruntime-mobile",
-            "modelId": "ppocr-v5-mobile",
+            "modelId": modelId,
             "durationMs": Int(Date().timeIntervalSince(startedAt) * 1000),
           ])
         } catch {

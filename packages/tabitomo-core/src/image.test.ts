@@ -86,25 +86,24 @@ test('performs Qwen advanced recognition and parses absolute overlay coordinates
   assert.deepEqual(lines[1], { text: 'invalid geometry is omitted' });
 });
 
-test('rejects unadapted General AI and custom coordinate OCR providers before network', async () => {
+test('supports custom OpenAI-compatible OCR providers without coordinate overlays', async () => {
   let called = false;
   globalThis.fetch = async () => {
     called = true;
-    return new Response('{}');
+    return new Response(JSON.stringify({ choices: [{ message: { content: 'Cafe menu' } }] }), { status: 200 });
   };
 
-  await assert.rejects(
-    () => performOCR('data:image/png;base64,AAAA', normalizeSettings({
+  const lines = await performOCR('data:image/png;base64,AAAA', normalizeSettings({
       imageOCR: {
         provider: 'custom',
         useGeneralAI: false,
         apiKey: 'legacy-key',
         endpoint: 'https://ocr.example.test/v1',
+        modelName: 'vision-model',
       },
-    })),
-    /supports only Alibaba Cloud Model Studio Qwen-OCR/,
-  );
-  assert.equal(called, false);
+    }));
+  assert.equal(called, true);
+  assert.deepEqual(lines, [{ text: 'Cafe menu' }]);
 });
 
 test('surfaces DashScope API errors without returning fake OCR output', async () => {

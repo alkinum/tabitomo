@@ -1,6 +1,8 @@
+import { OCRSettings } from './OCRSettings';
+import { AIConnection } from './AIConnection';
 import React, { useState, lazy, Suspense } from 'react';
 import { X, Save, Settings as SettingsIcon, Sparkles, Mic, Image as ImageIcon, ArrowLeftRight, Languages, CheckCircle, AlertCircle, CircleHelp } from 'lucide-react';
-import { AISettings, saveSettings, loadSettings, DEFAULT_SETTINGS, DASHSCOPE_OCR_ENDPOINT, DASHSCOPE_OCR_INTL_ENDPOINT, API_FORMAT_OPTIONS, type APIFormat, type LocalAsrEngine, type LocalVadMode, type SenseVoiceLanguage, type WhisperTask } from '../utils/config/settings';
+import { AISettings, saveSettings, loadSettings, DEFAULT_SETTINGS, API_FORMAT_OPTIONS, type APIFormat, type LocalAsrEngine, type LocalVadMode, type SenseVoiceLanguage, type WhisperTask } from '../utils/config/settings';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/Tabs';
 import { Switch } from './ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
@@ -21,7 +23,7 @@ interface SettingsPanelProps {
 const SETTINGS_HELP: Record<'general' | 'translation' | 'speech' | 'image', { title: string; body: string }> = {
   general: {
     title: 'General AI',
-    body: 'General AI powers explanations, Quick Q&A, and features configured to reuse the main provider. Match the API format to your endpoint, then enter the provider model name and API key. The default model is gpt-5.6-terra.',
+    body: 'General AI powers explanations, Quick Q&A, and features configured to reuse the main provider. Match the API format to your endpoint, then enter the provider model name and API key. Load the provider model catalog or enter a model ID.',
   },
   translation: {
     title: 'Translation',
@@ -33,7 +35,7 @@ const SETTINGS_HELP: Record<'general' | 'translation' | 'speech' | 'image', { ti
   },
   image: {
     title: 'Images',
-    body: 'OCR extracts text and coordinates before translation. Local uses PP-OCR v5. Cloud OCR currently supports Alibaba Cloud Model Studio Qwen-OCR only, using the native advanced_recognition response for accurate overlay coordinates. A normal OpenAI-compatible VLM endpoint is not an adapted OCR API.',
+    body: 'Local and Qwen OCR provide coordinate overlays. General AI and custom vision models extract text without overlays. Model IDs and endpoints remain your choice.',
   },
 };
 
@@ -127,7 +129,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
       {...backdropCloseHandlers}
     >
       <div
-        className="relative w-full max-w-md bg-white dark:bg-gray-800 rounded-3xl shadow-2xl animate-in zoom-in-95 duration-200"
+        className="settings-dialog relative w-full max-w-md bg-white dark:bg-gray-800 rounded-3xl shadow-2xl animate-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -159,6 +161,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
             </button>
             <button
               onClick={onClose}
+              aria-label="Close settings"
               className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded-lg transition-all duration-200 btn-pop"
             >
               <X className="w-5 h-5" />
@@ -167,7 +170,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
         </div>
 
         {/* Content */}
-        <div className="p-6 max-h-[60vh] overflow-y-auto custom-scrollbar">
+        <div className="settings-dialog-content p-6 max-h-[60vh] overflow-y-auto custom-scrollbar">
           <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'general' | 'translation' | 'speech' | 'image')}>
             <TabsList className="w-full grid grid-cols-4 mb-6">
               <TabsTrigger value="general" className="flex flex-col items-center gap-1 px-2 py-2">
@@ -191,6 +194,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
             {/* General AI Service Tab */}
             <TabsContent value="general">
               <div className="space-y-4">
+                <AIConnection value={settings.generalAI} onChange={(generalAI) => setSettings({ ...settings, generalAI })} />
                 {/* API Format */}
                 <div className="space-y-1.5">
                   <label htmlFor="generalApiFormat" className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
@@ -244,7 +248,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
                     type="text"
                     value={settings.generalAI.modelName}
                     onChange={(e) => setSettings({ ...settings, generalAI: { ...settings.generalAI, modelName: e.target.value } })}
-                    placeholder="gpt-5.6-terra"
+                    placeholder="Model ID"
                     className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors"
                   />
                 </div>
@@ -425,8 +429,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
                           ...settings,
                           speechRecognition: {
                             ...settings.speechRecognition,
-                            provider: 'siliconflow',
-                            apiKey: settings.apiKey
+                            provider: 'siliconflow'
                           }
                         })}
                         className={`p-3 rounded-xl border-2 transition-all duration-200 ${settings.speechRecognition.provider === 'siliconflow' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
@@ -454,18 +457,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
 
                   {settings.speechRecognition.provider === 'siliconflow' && (
                     <>
-                      <div className="space-y-1.5">
-                        <label htmlFor="aiServiceProvider" className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
-                          AI Service Provider
-                        </label>
-                        <Select value="siliconflow" disabled>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select provider" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="siliconflow">SiliconFlow</SelectItem>
-                          </SelectContent>
-                        </Select>
+<div className="space-y-1.5">
+                        <label htmlFor="speechEndpoint" className="block text-sm font-semibold text-gray-700 dark:text-gray-300">Speech endpoint</label>
+                        <input id="speechEndpoint" value={settings.speechRecognition.endpoint || ''} onChange={(e) => setSettings({ ...settings, speechRecognition: { ...settings.speechRecognition, endpoint: e.target.value } })} placeholder="https://api.example.com/v1" className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none" />
+                        <p className="text-xs text-gray-500 dark:text-gray-400">OpenAI-compatible audio/transcriptions API, including local servers.</p>
                       </div>
                       <div className="space-y-1.5">
                         <label htmlFor="speechModelName" className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
@@ -474,7 +469,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
                         <input
                           id="speechModelName"
                           type="text"
-                          value={settings.speechRecognition.modelName || 'TeleAI/TeleSpeechASR'}
+                          value={settings.speechRecognition.modelName || ''}
                           onChange={(e) => setSettings({
                             ...settings,
                             speechRecognition: {
@@ -482,7 +477,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
                               modelName: e.target.value
                             }
                           })}
-                          placeholder="TeleAI/TeleSpeechASR"
+                          placeholder="Transcription model ID"
                           className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors"
                         />
                       </div>
@@ -501,11 +496,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
                             apiKey: e.target.value
                           }
                         })}
-                        placeholder={settings.apiKey ? 'Using Translation API Key' : 'sk-...'}
+                        placeholder="Optional for local servers"
                         className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors"
                       />
                       <p className="text-xs text-gray-500 dark:text-gray-400">
-                        Leave empty to use the same API key as translation service
+                        Optional for local servers. A saved key is reused only for the same endpoint.
                       </p>
                     </div>
                     </>
@@ -756,9 +751,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
                 {/* Info Box */}
                 <div className="p-3 bg-indigo-50 dark:bg-indigo-900/30 rounded-xl border border-indigo-200 dark:border-indigo-800">
                   <p className="text-sm text-indigo-800 dark:text-indigo-200">
-                    <strong>Web Speech:</strong> Uses your browser's built-in speech recognition (free, works offline).
+                    <strong>Web Speech:</strong> Uses your browser’s speech recognition. Availability and network requirements depend on the browser.
                     <br />
-                    <strong>AI Service:</strong> Cloud-based AI providers (SiliconFlow) with better accuracy for multiple languages.
+                    <strong>AI Service:</strong> Uses your selected compatible transcription API and model. Accuracy depends on the language and model.
                     <br />
                     <strong>Local Model:</strong> Runs sherpa-onnx Whisper or SenseVoice from a configured model directory URL.
                   </p>
@@ -769,125 +764,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
             {/* Image Tab */}
             <TabsContent value="image">
               <div className="space-y-4">
-                {/* OCR Section */}
-                <div className="space-y-3">
-                  <h3 className="text-sm font-bold text-gray-800 dark:text-white flex items-center gap-2">
-                    <ImageIcon className="w-4 h-4" />
-                    OCR Recognition
-                  </h3>
-                  <div className="space-y-2">
-                    <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
-                      OCR Provider
-                    </label>
-                    <div className="grid grid-cols-3 gap-2">
-                      <button
-                        onClick={() => setSettings({
-                          ...settings,
-                          imageOCR: {
-                            ...settings.imageOCR,
-                            provider: 'local-ppocr',
-                            useGeneralAI: false,
-                          }
-                        })}
-                        className={`p-3 rounded-xl border-2 transition-all duration-200 ${settings.imageOCR.provider === 'local-ppocr' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
-                      >
-                        <div className="text-sm font-bold text-gray-800 dark:text-white">Local</div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">PP-OCRv5</div>
-                      </button>
-                      <button
-                        onClick={() => setSettings({
-                          ...settings,
-                          imageOCR: {
-                            ...settings.imageOCR,
-                            provider: 'qwen',
-                            useGeneralAI: false,
-                            endpoint: settings.imageOCR.endpoint.includes('aliyuncs.com') ? settings.imageOCR.endpoint : DASHSCOPE_OCR_ENDPOINT,
-                            modelName: settings.imageOCR.modelName || 'qwen3.5-ocr',
-                          }
-                        })}
-                        className={`p-3 rounded-xl border-2 transition-all duration-200 ${settings.imageOCR.provider !== 'local-ppocr' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
-                      >
-                        <div className="text-sm font-bold text-gray-800 dark:text-white">Alibaba Qwen-OCR</div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Model Studio API</div>
-                      </button>
-                    </div>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">Cloud OCR accepts an Alibaba Cloud Model Studio / DashScope API key and native OCR endpoint. Other OCR providers are not adapted yet.</p>
-                    {(settings.imageOCR.provider === 'custom' || settings.imageOCR.useGeneralAI) && (
-                      <p className="text-xs text-amber-700 dark:text-amber-300">This imported legacy OCR configuration is not an adapted coordinate API. Select Local or Alibaba Qwen-OCR before using OCR.</p>
-                    )}
-                  </div>
-                </div>
-
-                {/* Region Selection for Qwen */}
-                {settings.imageOCR.provider !== 'local-ppocr' && (
-                  <div className="space-y-2">
-                    <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
-                      Region
-                    </label>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        onClick={() => setSettings({ ...settings, imageOCR: { ...settings.imageOCR, provider: 'qwen', useGeneralAI: false, endpoint: DASHSCOPE_OCR_ENDPOINT } })}
-                        className={`p-3 rounded-xl border-2 transition-all duration-200 ${settings.imageOCR.endpoint === DASHSCOPE_OCR_ENDPOINT ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
-                      >
-                        <div className="text-sm font-bold text-gray-800 dark:text-white">Beijing</div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">China Mainland</div>
-                      </button>
-                      <button
-                        onClick={() => setSettings({ ...settings, imageOCR: { ...settings.imageOCR, provider: 'qwen', useGeneralAI: false, endpoint: DASHSCOPE_OCR_INTL_ENDPOINT } })}
-                        className={`p-3 rounded-xl border-2 transition-all duration-200 ${settings.imageOCR.endpoint === DASHSCOPE_OCR_INTL_ENDPOINT ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
-                      >
-                        <div className="text-sm font-bold text-gray-800 dark:text-white">Singapore</div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">International</div>
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {settings.imageOCR.provider !== 'local-ppocr' && (
-                  <>
-                    <div className="space-y-1.5">
-                      <label htmlFor="ocrEndpoint" className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
-                        Alibaba OCR Endpoint
-                      </label>
-                      <input
-                        id="ocrEndpoint"
-                        type="text"
-                        value={settings.imageOCR.endpoint}
-                        onChange={(e) => setSettings({ ...settings, imageOCR: { ...settings.imageOCR, provider: 'qwen', useGeneralAI: false, endpoint: e.target.value } })}
-                        placeholder={DASHSCOPE_OCR_INTL_ENDPOINT}
-                        className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors"
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300">Qwen OCR Model</label>
-                      <Select value={settings.imageOCR.modelName || 'qwen3.5-ocr'} onValueChange={(modelName) => setSettings({ ...settings, imageOCR: { ...settings.imageOCR, provider: 'qwen', modelName } })}>
-                        <SelectTrigger aria-label="Qwen OCR model"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="qwen3.5-ocr">qwen3.5-ocr (Recommended)</SelectItem>
-                          <SelectItem value="qwen-vl-ocr-latest">qwen-vl-ocr-latest (Compatibility)</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">advanced_recognition returns line text, four-point absolute coordinates, and rotation data for translated overlays.</p>
-                    </div>
-                  </>
-                )}
-
-                {/* API Key */}
-                {settings.imageOCR.provider !== 'local-ppocr' && (
-                  <div className="space-y-1.5">
-                    <label htmlFor="imageApiKey" className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
-                      Alibaba Model Studio API Key
-                    </label>
-                    <input
-                      id="imageApiKey"
-                      type="password"
-                      value={settings.imageOCR.apiKey}
-                      onChange={(e) => setSettings({ ...settings, imageOCR: { ...settings.imageOCR, apiKey: e.target.value } })}
-                      placeholder="sk-..."
-                      className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors"
-                    />
-                  </div>
-                )}
+                <h3 className="text-sm font-semibold">Image OCR</h3>
+                <OCRSettings settings={settings} onChange={setSettings} />
 
                 {/* VLM Section */}
                 <div className="space-y-3 pt-3 border-t-2 border-gray-200 dark:border-gray-700">
@@ -924,65 +802,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
                     </div>
                   </div>
 
-                  {!settings.vlm.useGeneralAI && !settings.vlm.useCustom && (
-                    <div className="space-y-3 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/70 dark:bg-indigo-900/20 p-3">
-                      <div>
-                        <div className="text-sm font-semibold text-gray-800 dark:text-white">OCR settings used by VLM</div>
-                        <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">Alibaba credentials and region are shared with OCR above. Direct translation uses qwen-vl-max-latest; the OCR model remains dedicated to coordinate extraction.</p>
-                      </div>
-                      <Select
-                        value={settings.imageOCR.provider === 'local-ppocr' ? 'local-ppocr' : 'qwen'}
-                        onValueChange={(provider) => setSettings({
-                          ...settings,
-                          imageOCR: {
-                            ...settings.imageOCR,
-                            provider: provider as 'local-ppocr' | 'qwen',
-                            useGeneralAI: false,
-                            localModel: provider === 'local-ppocr' ? 'ppocr-v5-mobile' : settings.imageOCR.localModel,
-                            endpoint: provider === 'qwen' && !settings.imageOCR.endpoint.includes('aliyuncs.com') ? DASHSCOPE_OCR_ENDPOINT : settings.imageOCR.endpoint,
-                          },
-                        })}
-                      >
-                        <SelectTrigger aria-label="VLM OCR provider">
-                          <SelectValue placeholder="Select OCR provider" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="local-ppocr">Local PP-OCR v5</SelectItem>
-                          <SelectItem value="qwen">Alibaba Qwen-OCR</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      {settings.imageOCR.provider === 'local-ppocr' && (
-                        <p className="text-xs text-gray-500 dark:text-gray-400">Local PP-OCR is an OCR pipeline, not a VLM. In OCR overlay mode it extracts local coordinates before line-by-line translation; choose General AI or Custom for direct VLM translation.</p>
-                      )}
-                      {settings.imageOCR.provider !== 'local-ppocr' && (
-                        <>
-                          <input
-                            type="text"
-                            aria-label="VLM OCR endpoint"
-                            value={settings.imageOCR.endpoint}
-                            onChange={(event) => setSettings({ ...settings, imageOCR: { ...settings.imageOCR, endpoint: event.target.value } })}
-                            placeholder={DASHSCOPE_OCR_INTL_ENDPOINT}
-                            className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors"
-                          />
-                          <Select value={settings.imageOCR.modelName || 'qwen3.5-ocr'} onValueChange={(modelName) => setSettings({ ...settings, imageOCR: { ...settings.imageOCR, provider: 'qwen', modelName } })}>
-                            <SelectTrigger aria-label="VLM OCR model"><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="qwen3.5-ocr">qwen3.5-ocr (Recommended)</SelectItem>
-                              <SelectItem value="qwen-vl-ocr-latest">qwen-vl-ocr-latest (Compatibility)</SelectItem>
-                            </SelectContent>
-                          </Select>
-                          <input
-                            type="password"
-                            aria-label="VLM OCR API key"
-                            value={settings.imageOCR.apiKey}
-                            onChange={(event) => setSettings({ ...settings, imageOCR: { ...settings.imageOCR, apiKey: event.target.value } })}
-                            placeholder="OCR API key"
-                            className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors"
-                          />
-                        </>
-                      )}
-                    </div>
-                  )}
+                  {!settings.vlm.useGeneralAI && !settings.vlm.useCustom && <div className="ocr-settings"><strong>OCR settings used by VLM</strong><p>Custom vision reuses the selected OCR model. Qwen coordinate OCR uses its companion vision model. Local OCR requires a separate vision connection.</p><OCRSettings settings={settings} onChange={setSettings} /></div>}
 
                   {!settings.vlm.useGeneralAI && settings.vlm.useCustom && (
                     <>
@@ -1053,7 +873,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
                   <p className="text-sm text-indigo-800 dark:text-indigo-200">
                     <strong>OCR Mode:</strong> Recognizes text regions and overlays translations on image.
                     <br />
-                    <strong>Local:</strong> Runs PP-OCRv5 in your browser. Models are downloaded on first use.
+                    <strong>Local:</strong> Runs PP-OCRv6 Small in your browser. Models are downloaded on first use.
                     <br />
                     <strong>VLM Mode:</strong> Directly translates image content using vision models (text output only).
                     <br />

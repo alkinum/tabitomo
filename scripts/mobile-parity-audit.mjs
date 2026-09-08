@@ -132,8 +132,30 @@ await includesAll('apps/mobile/App.tsx', 'Native shell', [
   ['native modal surfaces', 'Modal'],
   ['native gradient background', 'LinearGradient'],
   ['system color scheme', 'useColorScheme'],
-  ['flat press feedback', 'buttonPressed'],
+  ['native press feedback', 'buttonPressed'],
   ['shadow styling', 'shadowOffset'],
+  ['shared design tokens', "from '@tabitomo/core'"],
+  ['horizontal language swap', 'icon={ArrowLeftRight}'],
+  ['visible primary action', 'styles.translateButtonText'],
+  ['quiet input tools', 'styles.iconButtonQuiet'],
+  ['system segmented control', '<SegmentedControl'],
+  ['native sheet presentation', 'presentationStyle="pageSheet"'],
+  ['interactive sheet dismissal', 'allowSwipeDismissal'],
+  ['native material controls', '<NativeMaterial'],
+  ['language search', 'accessibilityLabel="Search languages"'],
+]);
+await includesAll('apps/mobile/src/NativeChrome.tsx', 'iOS material availability', [
+  ['Liquid Glass API availability', 'isGlassEffectAPIAvailable()'],
+  ['Liquid Glass design availability', 'isLiquidGlassAvailable()'],
+  ['older iOS material fallback', '<BlurView'],
+  ['reduced transparency preference', 'isReduceTransparencyEnabled()'],
+  ['reduced motion preference', 'isReduceMotionEnabled()'],
+  ['selection haptic', 'Haptics.selectionAsync()'],
+]);
+await includesAll('packages/tabitomo-core/src/designTokens.ts', 'Shared design tokens', [
+  ['brand accent color', "accent: '#6366f1'"],
+  ['web-aligned light gradient start', "gradient: ['#eef2ff'"],
+  ['dark gradient indigo-950', "gradient: ['#111827'"],
 ]);
 await excludesAll('apps/mobile/App.tsx', 'Native shell', [
   ['WebView wrapper', 'WebView'],
@@ -204,7 +226,7 @@ await includesAll('apps/mobile/App.tsx', 'Mobile text/image parity features', [
   ['assistant target-only language style', 'languageBarTargetOnly'],
   ['assistant target-only language label', 'Target Language'],
   ['image mode segmented control', 'SegmentButton label="VLM"'],
-  ['OCR overlay segmented control', 'SegmentButton label="OCR overlay"'],
+  ['OCR overlay segmented control', "? 'OCR text' : 'OCR overlay'"],
   ['copy action', 'handleCopy'],
   ['copy success state', 'const [resultCopied, setResultCopied]'],
   ['copy success reset timer', 'resultCopyResetTimerRef'],
@@ -251,17 +273,30 @@ await includesAll('src/components/SettingsPanel.tsx', 'Web settings surface', [
   ['translation output mode', 'settings.translation?.outputMode'],
   ['speech provider', 'settings.speechRecognition.provider'],
   ['local ASR engine', 'localEngine'],
-  ['OCR provider', 'settings.imageOCR.provider'],
+  ['shared OCR form', '<OCRSettings'],
   ['VLM settings', 'settings.vlm'],
-  ['Alibaba Qwen OCR provider', 'Alibaba Qwen-OCR'],
-  ['recommended Qwen OCR model', 'qwen3.5-ocr (Recommended)'],
-  ['Qwen coordinate explanation', 'four-point absolute coordinates'],
+  ['AI connection', '<AIConnection'],
+  ['editable speech endpoint', 'id="speechEndpoint"'],
 ]);
 
-await excludesAll('src/components/SettingsPanel.tsx', 'Web supported OCR providers', [
-  ['custom OCR provider option', 'Custom OCR provider'],
-  ['General AI OCR option', 'General AI OCR'],
+for (const file of ['src/components/SettingsPanel.tsx', 'src/components/WelcomeWizard.tsx']) {
+  await includesAll(file, 'Shared setup and settings forms', [
+    ['AI connection', '<AIConnection'], ['OCR configuration', '<OCRSettings'],
+  ]);
+}
+await includesAll('src/components/OCRSettings.tsx', 'Provider-independent OCR form', [
+  ['mode contract', 'selectOCRMode'], ['general model reuse', 'general'], ['custom model', 'custom'], ['editable model ID', 'ocr.modelName'],
 ]);
+await includesAll('src/utils/translation/translation.ts', 'Shared Web text requests', [['core translator', 'tabitomo-core/src/translation']]);
+await includesAll('src/utils/translation/explanation.ts', 'Shared Web assistant requests', [['core assistant', 'tabitomo-core/src/assistant']]);
+await includesAll('src/utils/image/imageOcr.ts', 'Shared Web image requests', [['core image', 'tabitomo-core/src/image']]);
+await includesAll('src/designTheme.ts', 'Web shared palette', [['light tokens', 'lightTheme'], ['dark tokens', 'darkTheme']]);
+for (const file of ['src/components/AIConnection.tsx', 'apps/mobile/src/AIConnection.tsx']) {
+  await includesAll(file, 'Provider connection parity', [
+    ['PKCE session', 'createOpenRouterSession'], ['authorization exchange', 'exchangeOpenRouterCode'],
+    ['model discovery', 'fetchAvailableModels'], ['request cleanup', 'request.current?.abort()'],
+  ]);
+}
 
 await includesAll('apps/mobile/App.tsx', 'Mobile settings parity surface', [
   ['General AI section', 'title="General AI"'],
@@ -290,9 +325,9 @@ await includesAll('apps/mobile/App.tsx', 'Mobile settings parity surface', [
   ['iCloud conflict help', 'newer edit wins'],
   ['settings help entry', 'function SettingsSection'],
   ['settings help popup', 'Alert.alert(title, help)'],
-  ['native keyboard inset', 'automaticallyAdjustKeyboardInsets'],
+  ['native keyboard handling', 'KeyboardAvoidingView'],
   ['Alibaba Qwen OCR provider', 'Alibaba Qwen-OCR'],
-  ['recommended Qwen OCR model', 'qwen3.5-ocr · Recommended'],
+  ['shared OCR mode contract', 'selectOCRMode'],
 ]);
 
 await includesAll('packages/tabitomo-core/src/image.ts', 'Shared native Qwen OCR adapter', [
@@ -300,7 +335,19 @@ await includesAll('packages/tabitomo-core/src/image.ts', 'Shared native Qwen OCR
   ['native response geometry path', 'ocr_result?.words_info'],
   ['default Qwen 3.5 OCR model', "'qwen3.5-ocr'"],
   ['legacy endpoint normalization', "endsWith('/compatible-mode/v1')"],
-  ['unadapted provider error', 'custom OCR endpoints are not adapted'],
+  ['custom OCR extraction', "imageOCR.provider === 'custom'"],
+]);
+
+await includesAll('apps/mobile/plugins/withSceneLifecycle.js', 'iOS scene lifecycle', [
+  ['window scene initialization', 'UIWindow(windowScene: windowScene)'],
+  ['cold launch URL delivery', 'launchOptions[.url] = url'],
+  ['warm URL delivery', 'openURLContexts'],
+  ['scene manifest', 'UIApplicationSceneManifest'],
+]);
+await includesAll('apps/mobile/ios/tabitomo/Info.plist', 'Local provider native access', [
+  ['release permission description', 'AI models running on a computer on your local network'],
+  ['local ATS support', 'NSAllowsLocalNetworking'],
+  ['scene delegate', 'TabitomoSceneDelegate'],
 ]);
 
 await includesAll('apps/mobile/src/storage.ts', 'iOS CloudKit settings sync', [
@@ -385,7 +432,7 @@ await includesAll('apps/mobile/App.tsx', 'Local model parity track', [
   ['fixed offline model download', 'installOfflineModel'],
   ['Whisper download', "'whisper-base'"],
   ['SenseVoice download', "'sensevoice-small'"],
-  ['PP-OCR v5 download', "'ppocr-v5-mobile'"],
+  ['PP-OCR v6 Small download', "'ppocr-v6-small'"],
   ['OCR settings shown for VLM reuse', 'OCR settings used by VLM'],
   ['image settings smoke selects OCR reuse', 'const SMOKE_IMAGE_SETTINGS'],
   ['native local-model module', "from '@tabitomo/native-local-models'"],
@@ -400,9 +447,18 @@ await includesAll('apps/mobile/src/modelPacks.ts', 'Fixed tabitomo model assets'
   ['asset origin', 'https://assets.tabitomo.alkinum.io'],
   ['Whisper fixed asset', "id: 'whisper-base'"],
   ['SenseVoice fixed asset', "id: 'sensevoice-small'"],
-  ['PP-OCR v5 fixed asset', "id: 'ppocr-v5-mobile'"],
+  ['PP-OCR v6 Small fixed asset', "id: 'ppocr-v6-small'"],
   ['verified fixed-model installer', 'installOfflineModel'],
   ['manifest file origin enforcement', 'allowedAssetOrigin'],
+]);
+
+await includesAll('src/utils/image/localPpocrWorker.ts', 'Web local OCR model parity', [
+  ['PP-OCR v6 Small detector', "textDetectionModelName: 'PP-OCRv6_small_det'"],
+  ['PP-OCR v6 Small recognizer', "textRecognitionModelName: 'PP-OCRv6_small_rec'"],
+]);
+
+await includesAll('packages/tabitomo-core/src/settings.ts', 'Shared local OCR settings contract', [
+  ['PP-OCR v6 Small default model', "localModel: 'ppocr-v6-small'"],
 ]);
 
 await includesAll('packages/tabitomo-native-local-models/ios/TabitomoLocalModelsBridge.mm', 'Native local inference adapters', [
@@ -413,6 +469,10 @@ await includesAll('packages/tabitomo-native-local-models/ios/TabitomoLocalModels
   ['PP-OCR detector', 'det.onnx'],
   ['PP-OCR recognizer', 'rec.onnx'],
   ['PP-OCR dictionary', 'dict.txt'],
+  ['PP-OCR v6 Small model identity', 'ppocr-v6-small'],
+  ['PP-OCR v6 Small detector threshold', '0.2f'],
+  ['PP-OCR v6 Small detector box threshold', '0.45f'],
+  ['PP-OCR v6 Small dynamic recognition width', 'recognizerMaxWidth'],
 ]);
 
 await includesAll('scripts/mobile-model-assets-check.mjs', 'Published local-model runtime assets', [

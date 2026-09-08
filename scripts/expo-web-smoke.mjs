@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -235,32 +235,7 @@ try {
     }
 
     if (isImageRequest) {
-      await route.fulfill({
-        status: 200,
-        headers: {
-          ...corsHeaders,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({
-          choices: [
-            {
-              message: {
-                content: JSON.stringify({
-                  ocr_result: {
-                    words_info: [
-                      {
-                        text: mockOCRText,
-                        location: [0, 0, 100, 0, 100, 50, 0, 50],
-                        rotate_rect: [50, 25, 100, 50, 0],
-                      },
-                    ],
-                  },
-                }),
-              },
-            },
-          ],
-        }),
-      });
+      await route.fulfill({ status: 200, headers: corsHeaders, json: { choices: [{ message: { content: mockOCRText } }] } });
       return;
     }
 
@@ -342,7 +317,7 @@ try {
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByPlaceholder('https://api.openai.com/v1').waitFor({ state: 'visible' });
   let persistedEndpoint = await page.getByPlaceholder('https://api.openai.com/v1').inputValue();
-  let persistedModel = await page.getByPlaceholder('gpt-5.6-terra').inputValue();
+  let persistedModel = await page.getByPlaceholder('Model ID', { exact: true }).inputValue();
   let persistedApiKey = await page.getByPlaceholder('sk-...').inputValue();
 
   if (
@@ -406,8 +381,14 @@ try {
 
   await page.getByRole('button', { name: 'Japanese language' }).click();
   await page.getByText('Choose language').waitFor({ state: 'visible' });
+  await page.getByLabel('Search languages').fill('no-such-language');
+  await page.getByText('No matching languages.').waitFor({ state: 'visible' });
+  await page.getByLabel('Search languages').fill('English');
   await page.getByRole('button', { name: 'English' }).click();
   await page.getByRole('button', { name: 'English language' }).waitFor({ state: 'visible' });
+  await page.getByRole('button', { name: 'English language' }).click();
+  if (await page.getByLabel('Search languages').inputValue()) throw new Error('Language search was retained after reopening.');
+  await page.getByRole('button', { name: 'Close', exact: true }).click();
   await page.getByRole('button', { name: 'Swap' }).click();
   await page.getByRole('button', { name: 'English language' }).waitFor({ state: 'visible' });
 
@@ -416,7 +397,7 @@ try {
   await page.getByText('Translation override', { exact: true }).waitFor({ state: 'visible' });
 
   await page.getByPlaceholder('https://api.openai.com/v1').fill(mockProviderEndpoint);
-  await page.getByPlaceholder('gpt-5.6-terra').fill('tabitomo-smoke-model');
+  await page.getByPlaceholder('Model ID', { exact: true }).fill('tabitomo-smoke-model');
   await page.getByPlaceholder('sk-...').fill('sk-tabitomo-smoke');
 
   await page.getByRole('tab', { name: 'Speech settings' }).click();
@@ -430,7 +411,7 @@ try {
   await page.getByPlaceholder('DashScope API key').fill('sk-tabitomo-ocr-smoke');
   await page.getByRole('button', { name: 'OCR settings' }).click();
   await page.getByText('OCR settings used by VLM', { exact: true }).waitFor({ state: 'visible' });
-  await page.getByText(/qwen3\.5-ocr/).first().waitFor({ state: 'visible' });
+  if (await page.getByRole('textbox', { name: 'OCR model', exact: true }).first().inputValue() !== 'qwen3.5-ocr') throw new Error('Explicit Qwen model selection was lost.');
   await page.getByPlaceholder('DashScope API key').nth(1).waitFor({ state: 'visible' });
 
   await page.getByRole('tab', { name: 'Offline settings' }).click();
@@ -439,7 +420,7 @@ try {
   await page.getByText(/0 downloaded.*0 runtime-ready.*0 B/).waitFor({ state: 'visible' });
   await page.getByRole('button', { name: 'Download Whisper Base' }).waitFor({ state: 'visible' });
   await page.getByRole('button', { name: 'Download SenseVoice Small' }).waitFor({ state: 'visible' });
-  await page.getByRole('button', { name: 'Download PP-OCR v5 Mobile' }).waitFor({ state: 'visible' });
+  await page.getByRole('button', { name: 'Download PP-OCR v6 Small' }).waitFor({ state: 'visible' });
 
   await page.getByRole('tab', { name: 'Config settings' }).click();
   await page.getByText('Import / Export', { exact: true }).waitFor({ state: 'visible' });
@@ -453,7 +434,7 @@ try {
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByPlaceholder('https://api.openai.com/v1').waitFor({ state: 'visible' });
   persistedEndpoint = await page.getByPlaceholder('https://api.openai.com/v1').inputValue();
-  persistedModel = await page.getByPlaceholder('gpt-5.6-terra').inputValue();
+  persistedModel = await page.getByPlaceholder('Model ID', { exact: true }).inputValue();
   persistedApiKey = await page.getByPlaceholder('sk-...').inputValue();
 
   if (
@@ -476,7 +457,7 @@ try {
 
   await page.getByRole('tab', { name: 'AI settings' }).click();
   await page.getByPlaceholder('https://api.openai.com/v1').fill('https://changed.example.test/v1');
-  await page.getByPlaceholder('gpt-5.6-terra').fill('changed-model');
+  await page.getByPlaceholder('Model ID', { exact: true }).fill('changed-model');
   await page.getByPlaceholder('sk-...').fill('sk-changed');
   await page.getByRole('tab', { name: 'Config settings' }).click();
   await page.getByLabel('Encrypted config payload').fill(exportedSettingsPayload);
@@ -487,7 +468,7 @@ try {
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByPlaceholder('https://api.openai.com/v1').waitFor({ state: 'visible' });
   persistedEndpoint = await page.getByPlaceholder('https://api.openai.com/v1').inputValue();
-  persistedModel = await page.getByPlaceholder('gpt-5.6-terra').inputValue();
+  persistedModel = await page.getByPlaceholder('Model ID', { exact: true }).inputValue();
   persistedApiKey = await page.getByPlaceholder('sk-...').inputValue();
 
   if (
@@ -556,6 +537,90 @@ try {
     throw new Error(`Expo mobile Settings overflows at 320x720: ${JSON.stringify(narrowLayout)}.`);
   }
   await page.getByRole('button', { name: 'Cancel' }).click();
+
+  // Custom OCR returns text; never require Qwen geometry or reuse its credentials.
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('tab', { name: 'Image settings' }).click();
+  await page.getByRole('button', { name: 'Custom vision', exact: true }).first().click();
+  await page.getByRole('textbox', { name: 'Custom OCR endpoint', exact: true }).first().fill(mockProviderEndpoint);
+  await page.getByRole('textbox', { name: 'OCR model', exact: true }).first().fill('custom-vision');
+  await page.getByLabel('OCR API key', { exact: true }).first().fill('custom-key');
+  await page.getByRole('button', { name: 'Save settings' }).click();
+  await page.getByRole('button', { name: 'Clear', exact: true }).click();
+  const customChooser = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: 'Album' }).click();
+  await (await customChooser).setFiles(smokeImagePath);
+  await page.getByText(mockOCRTranslation).first().waitFor({ state: 'visible' });
+  if (!providerRequests.some((request) => request.model === 'custom-vision')) throw new Error('Custom OCR did not use the selected model.');
+  await page.getByRole('button', { name: 'Clear', exact: true }).click();
+
+  const screenshots = path.join(rootDir, 'output/playwright');
+  await mkdir(screenshots, { recursive: true });
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: width === 320 ? 720 : 844 });
+    for (const colorScheme of ['light', 'dark']) {
+      await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' });
+      const actions = await Promise.all(['Speak', 'Camera', 'Album', 'Translate'].map((name) => page.getByRole('button', { name, exact: true }).boundingBox()));
+      for (let index = 0; index < actions.length; index++) {
+        const box = actions[index];
+        if (!box || box.x < 16 || box.x + box.width > width - 16 || box.height < 40) throw new Error('Mobile input action is clipped or too small.');
+        if (index && box.x + 0.5 < actions[index - 1].x + actions[index - 1].width) throw new Error(`Mobile input actions overlap at ${width}px (${colorScheme}): ${JSON.stringify(actions)}`);
+      }
+      await page.screenshot({ path: path.join(screenshots, `expo-${width}-${colorScheme}.png`), fullPage: true });
+      if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)) throw new Error('Mobile workspace overflow.');
+      for (const mode of ['Explain', 'Q&A']) {
+        await page.getByRole('tab', { name: `${mode} text mode` }).click();
+        await page.getByText('Target Language', { exact: true }).waitFor({ state: 'visible' });
+        // Let the React Native spring indicator settle before capturing the mode.
+        await page.waitForTimeout(500);
+        await page.screenshot({ path: path.join(screenshots, `expo-${width}-${colorScheme}-${mode === 'Explain' ? 'explain' : 'qa'}.png`), fullPage: true });
+      }
+      await page.getByRole('tab', { name: 'Translate text mode' }).click();
+      await page.waitForTimeout(500);
+    }
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.getByLabel('Source text').fill('駅はどこですか？');
+  await page.getByRole('button', { name: 'Translate', exact: true }).click();
+  await page.getByText(mockTranslation, { exact: true }).waitFor({ state: 'visible' });
+  await page.screenshot({ path: path.join(screenshots, 'expo-390-result-light.png'), fullPage: true });
+  await page.getByRole('button', { name: 'Clear', exact: true }).click();
+  await page.setViewportSize({ width: 320, height: 720 });
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('tab', { name: 'AI settings' }).click();
+  await page.getByRole('button', { name: 'Choose AI provider', exact: true }).waitFor({ state: 'visible' });
+  await page.screenshot({ path: path.join(screenshots, 'expo-settings-320-light.png'), fullPage: true });
+  await page.context().route('https://openrouter.ai/auth?**', (route) => route.fulfill({ body: 'Mock authorization page' }));
+  let authExchanges = 0;
+  await page.route('https://openrouter.ai/api/v1/auth/keys', (route) => {
+    authExchanges++;
+    const body = route.request().postDataJSON();
+    if (body.code !== 'one-time-code' || !/^[A-Za-z0-9_-]{43}$/.test(body.code_verifier)) throw new Error('Invalid PKCE exchange.');
+    return route.fulfill({ json: { key: 'mock-authorized-key' } });
+  });
+  await page.route('https://openrouter.ai/api/v1/models', (route) => route.fulfill({ json: { data: [
+    { id: 'vendor/vision', name: 'Travel Vision', architecture: { input_modalities: ['text', 'image'] } },
+    { id: 'vendor/text', name: 'Travel Text', architecture: { input_modalities: ['text'] } },
+  ] } }));
+  await page.getByRole('button', { name: 'Connect with OpenRouter' }).click();
+  await page.getByLabel('Authorization code').fill('one-time-code');
+  await page.getByRole('button', { name: 'Finish connection' }).click();
+  await page.getByText('Connected. Load models to choose one, then save your settings.').waitFor({ state: 'visible' });
+  if (authExchanges !== 1) throw new Error('Missing OpenRouter exchange.');
+  await page.getByRole('button', { name: 'Load available models' }).click();
+  await page.getByRole('checkbox', { name: 'Image-capable models' }).click();
+  await page.getByRole('button', { name: /Travel Vision/ }).click();
+  if (await page.getByPlaceholder('Model ID', { exact: true }).inputValue() !== 'vendor/vision') throw new Error('Model discovery selection was lost.');
+  if (await page.getByRole('button', { name: /Travel Text/ }).count()) throw new Error('Vision filter failed.');
+  await page.screenshot({ path: path.join(screenshots, 'expo-connection-320.png'), fullPage: true });
+  await page.getByRole('button', { name: 'Choose AI provider', exact: true }).click();
+  await page.screenshot({ path: path.join(screenshots, 'expo-providers-320-light.png'), fullPage: true });
+  await page.getByRole('button', { name: 'Local server', exact: true }).click();
+  await page.getByRole('button', { name: 'Local server', exact: true }).waitFor({ state: 'detached' });
+  if (await page.getByRole('button', { name: 'Choose AI provider', exact: true }).getAttribute('aria-expanded') !== 'false') throw new Error('Provider picker did not close after selection.');
+  if (await page.getByPlaceholder('sk-...').inputValue()) throw new Error('Provider switch retained credentials.');
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
 
   if (runtimeErrors.length) {
     throw new Error(`Expo web smoke found runtime errors:\n${runtimeErrors.join('\n')}`);

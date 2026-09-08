@@ -1,6 +1,6 @@
 import { NativeModule, requireOptionalNativeModule } from 'expo-modules-core';
 
-export type NativeLocalModelId = 'whisper-base' | 'sensevoice-small' | 'ppocr-v5-mobile';
+export type NativeLocalModelId = 'whisper-base' | 'sensevoice-small' | 'ppocr-v6-small';
 
 export interface NativeLocalASROptions {
   language?: string;
@@ -25,7 +25,7 @@ export interface NativeLocalOCRTextLocation {
 export interface NativeLocalOCRResult {
   items: NativeLocalOCRTextLocation[];
   runtime: 'onnxruntime-mobile';
-  modelId: 'ppocr-v5-mobile';
+  modelId: 'ppocr-v6-small';
   durationMs: number;
 }
 
@@ -49,6 +49,7 @@ export class TabitomoNativeLocalModelsModule extends NativeModule {
   ) => Promise<NativeLocalASRResult>;
   recognizeTextAsync!: (
     imageUri: string,
+    modelId: 'ppocr-v6-small',
     modelRootUri: string
   ) => Promise<NativeLocalOCRResult>;
   unloadModelAsync!: (modelId: NativeLocalModelId, modelRootUri: string) => Promise<void>;

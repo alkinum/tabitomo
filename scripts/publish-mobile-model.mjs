@@ -13,7 +13,7 @@ const MODELS = {
   'whisper-base': { feature: 'asr', runtime: 'sherpa-onnx-ios', label: 'Whisper Base' },
   'whisper-small': { feature: 'asr', runtime: 'sherpa-onnx-ios', label: 'Whisper Small' },
   'sensevoice-small': { feature: 'asr', runtime: 'sherpa-onnx-ios', label: 'SenseVoice Small' },
-  'ppocr-v5-mobile': { feature: 'ocr', runtime: 'onnxruntime-mobile', label: 'PP-OCR v5 Mobile' },
+  'ppocr-v6-small': { feature: 'ocr', runtime: 'onnxruntime-mobile', label: 'PP-OCR v6 Small' },
 };
 
 const args = process.argv.slice(2);

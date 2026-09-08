@@ -4,7 +4,6 @@
  */
 
 import { schema, ObjectSchema, validateSchema as validateSchemaBase, applyDefaults } from './schema';
-import { DASHSCOPE_OCR_ENDPOINT } from './settings';
 
 // Re-export validation functions
 export { validateSchemaBase as validateSchema, applyDefaults };
@@ -31,7 +30,7 @@ export const speechRecognitionSchema = {
   }),
   endpoint: schema.string({ optional: true, default: '' }),
   apiKey: schema.string({ optional: true }),
-  modelName: schema.string({ optional: true, default: 'TeleAI/TeleSpeechASR' }),
+  modelName: schema.string({ optional: true, default: '' }),
   enableRealtimeTranscription: schema.boolean({ optional: true, default: true }),
   localEngine: schema.enum(['whisper', 'sensevoice'] as const, {
     optional: true,
@@ -66,7 +65,7 @@ export const speechRecognitionSchema = {
 export const generalAISchema = {
   apiKey: schema.string({ default: '' }),
   endpoint: schema.string({ default: '' }),
-  modelName: schema.string({ default: 'gpt-5.6-terra' }),
+  modelName: schema.string({ default: '' }),
   apiFormat: schema.enum(['openai-chat', 'openai-responses', 'anthropic'] as const, { default: 'openai-chat' }),
 };
 
@@ -76,10 +75,10 @@ export const generalAISchema = {
 export const imageOCRSchema = {
   provider: schema.enum(['local-ppocr', 'qwen', 'custom'] as const, { default: 'local-ppocr' }),
   useGeneralAI: schema.boolean({ optional: true, default: false }),
-  localModel: schema.enum(['ppocr-v5-mobile'] as const, { optional: true, default: 'ppocr-v5-mobile' }),
+  localModel: schema.enum(['ppocr-v6-small'] as const, { optional: true, default: 'ppocr-v6-small' }),
   apiKey: schema.string({ default: '' }),
-  endpoint: schema.string({ default: DASHSCOPE_OCR_ENDPOINT }),
-  modelName: schema.string({ optional: true, default: 'qwen3.5-ocr' }),
+  endpoint: schema.string({ default: '' }),
+  modelName: schema.string({ optional: true, default: '' }),
 };
 
 /**
@@ -161,7 +160,7 @@ export type AIConfigV1 = {
   imageOCR: {
     provider: 'local-ppocr' | 'qwen' | 'custom';
     useGeneralAI?: boolean;
-    localModel?: 'ppocr-v5-mobile';
+    localModel?: 'ppocr-v6-small';
     apiKey: string;
     endpoint: string;
     modelName?: string;

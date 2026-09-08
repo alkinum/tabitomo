@@ -1,6 +1,5 @@
 import {
   DASHSCOPE_ENDPOINT,
-  DASHSCOPE_INTL_ENDPOINT,
   DASHSCOPE_OCR_ENDPOINT,
   DASHSCOPE_OCR_INTL_ENDPOINT,
   DEFAULT_SETTINGS,
@@ -73,20 +72,22 @@ export const ANTHROPIC_ENDPOINT = 'https://api.anthropic.com/v1';
 
 export const GENERAL_AI_PRESETS: readonly GeneralAIPreset[] = [
   {
+    id: 'openrouter', label: 'OpenRouter', description: 'Connect your account and choose from the live model catalog.',
+    endpoint: 'https://openrouter.ai/api/v1', apiFormat: 'openai-chat', defaultModel: '', models: [],
+  },
+  {
+    id: 'local-server', label: 'Local server', description: 'Ollama, LM Studio or another compatible server. On a phone, use the computer’s LAN address.',
+    endpoint: 'http://localhost:1234/v1', apiFormat: 'openai-chat', defaultModel: '', models: [],
+  },
+
+  {
     id: 'openai-responses',
     label: 'OpenAI Responses',
-    description: 'Best default for modern OpenAI text and vision-capable models.',
+    description: 'OpenAI Responses API; choose an available model from your account.',
     endpoint: OPENAI_ENDPOINT,
     apiFormat: 'openai-responses',
-    defaultModel: 'gpt-5.6-terra',
-    models: [
-      { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra' },
-      { id: 'gpt-5.5', label: 'GPT-5.5' },
-      { id: 'gpt-5.4', label: 'GPT-5.4' },
-      { id: 'gpt-5.4-mini', label: 'GPT-5.4 mini' },
-      { id: 'gpt-4o', label: 'GPT-4o' },
-      { id: 'gpt-4o-mini', label: 'GPT-4o mini' },
-    ],
+    defaultModel: '',
+    models: [],
   },
   {
     id: 'openai-chat',
@@ -94,13 +95,8 @@ export const GENERAL_AI_PRESETS: readonly GeneralAIPreset[] = [
     description: 'OpenAI-compatible chat completions for broad provider support.',
     endpoint: OPENAI_ENDPOINT,
     apiFormat: 'openai-chat',
-    defaultModel: 'gpt-5.6-terra',
-    models: [
-      { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra' },
-      { id: 'gpt-5.5', label: 'GPT-5.5' },
-      { id: 'gpt-4o', label: 'GPT-4o' },
-      { id: 'gpt-4o-mini', label: 'GPT-4o mini' },
-    ],
+    defaultModel: '',
+    models: [],
   },
   {
     id: 'anthropic',
@@ -108,13 +104,8 @@ export const GENERAL_AI_PRESETS: readonly GeneralAIPreset[] = [
     description: 'Claude Messages API for explanation and Q&A quality.',
     endpoint: ANTHROPIC_ENDPOINT,
     apiFormat: 'anthropic',
-    defaultModel: 'claude-sonnet-5',
-    models: [
-      { id: 'claude-fable-5', label: 'Claude Fable 5' },
-      { id: 'claude-sonnet-5', label: 'Claude Sonnet 5' },
-      { id: 'claude-opus-4-8', label: 'Claude Opus 4.8' },
-      { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
-    ],
+    defaultModel: '',
+    models: [],
   },
   {
     id: 'dashscope-qwen',
@@ -122,12 +113,8 @@ export const GENERAL_AI_PRESETS: readonly GeneralAIPreset[] = [
     description: 'OpenAI-compatible Qwen models, useful for Chinese/Japanese flows.',
     endpoint: DASHSCOPE_ENDPOINT,
     apiFormat: 'openai-chat',
-    defaultModel: 'qwen3.7-plus',
-    models: [
-      { id: 'qwen3.7-max', label: 'Qwen3.7 Max' },
-      { id: 'qwen3.7-plus', label: 'Qwen3.7 Plus' },
-      { id: 'qwen3.6-flash', label: 'Qwen3.6 Flash' },
-    ],
+    defaultModel: '',
+    models: [],
   },
   {
     id: 'siliconflow',
@@ -135,11 +122,8 @@ export const GENERAL_AI_PRESETS: readonly GeneralAIPreset[] = [
     description: 'OpenAI-compatible hosted models used by the web app presets.',
     endpoint: SILICONFLOW_ENDPOINT,
     apiFormat: 'openai-chat',
-    defaultModel: 'Qwen/Qwen3-30B-A3B',
-    models: [
-      { id: 'Qwen/Qwen3-30B-A3B', label: 'Qwen3 30B A3B' },
-      { id: 'tencent/Hunyuan-MT-7B', label: 'Hunyuan-MT 7B' },
-    ],
+    defaultModel: '',
+    models: [],
   },
 ] as const;
 
@@ -151,36 +135,25 @@ export const TRANSLATION_PROVIDER_PRESETS: readonly TranslationProviderPreset[] 
     endpoint: SILICONFLOW_ENDPOINT,
     defaultModel: 'tencent/Hunyuan-MT-7B',
     outputMode: 'plain',
-    models: [
-      { id: 'tencent/Hunyuan-MT-7B', label: 'Hunyuan-MT 7B' },
-    ],
+    models: [],
   },
   {
     id: 'openai-translation',
     label: 'OpenAI',
     description: 'Use OpenAI-compatible text models for translation override.',
     endpoint: OPENAI_ENDPOINT,
-    defaultModel: 'gpt-5.6-terra',
+    defaultModel: '',
     outputMode: 'structured',
-    models: [
-      { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra' },
-      { id: 'gpt-5.5', label: 'GPT-5.5' },
-      { id: 'gpt-4o', label: 'GPT-4o' },
-      { id: 'gpt-4o-mini', label: 'GPT-4o mini' },
-    ],
+    models: [],
   },
   {
     id: 'dashscope-qwen-translation',
     label: 'DashScope Qwen',
     description: 'Qwen text models through OpenAI-compatible API.',
     endpoint: DASHSCOPE_ENDPOINT,
-    defaultModel: 'qwen3.7-plus',
+    defaultModel: '',
     outputMode: 'structured',
-    models: [
-      { id: 'qwen3.7-max', label: 'Qwen3.7 Max' },
-      { id: 'qwen3.7-plus', label: 'Qwen3.7 Plus' },
-      { id: 'qwen3.6-flash', label: 'Qwen3.6 Flash' },
-    ],
+    models: [],
   },
 ] as const;
 
@@ -287,16 +260,11 @@ export const VLM_PROVIDER_PRESETS: readonly VLMPreset[] = [
   {
     id: 'openai-vision',
     label: 'OpenAI Vision',
-    description: 'OpenAI-compatible vision model for direct image translation.',
+    description: 'Choose an available vision model on your account.',
     mode: 'custom',
     endpoint: OPENAI_ENDPOINT,
-    defaultModel: 'gpt-5.6-terra',
-    models: [
-      { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra' },
-      { id: 'gpt-5.5', label: 'GPT-5.5' },
-      { id: 'gpt-4o', label: 'GPT-4o' },
-      { id: 'gpt-4o-mini', label: 'GPT-4o mini' },
-    ],
+    defaultModel: '',
+    models: [],
   },
 ] as const;
 
@@ -312,6 +280,7 @@ export function applyGeneralAIPreset(settings: AISettings, presetId: string): AI
     ...settings,
     generalAI: {
       ...settings.generalAI,
+      apiKey: settings.generalAI.endpoint.replace(/\/+$/, '') === preset.endpoint.replace(/\/+$/, '') ? settings.generalAI.apiKey : '',
       apiFormat: preset.apiFormat,
       endpoint: preset.endpoint,
       modelName: preset.defaultModel,
@@ -326,6 +295,7 @@ export function applyTranslationProviderPreset(settings: AISettings, presetId: s
   return {
     ...settings,
     provider: 'custom',
+    apiKey: settings.endpoint === preset.endpoint ? settings.apiKey : '',
     endpoint: preset.endpoint,
     modelName: preset.defaultModel,
     translation: {
@@ -358,6 +328,7 @@ export function applySpeechProviderPreset(settings: AISettings, presetId: string
     speechRecognition: {
       ...settings.speechRecognition,
       provider: preset.provider,
+      apiKey: settings.speechRecognition.endpoint === preset.endpoint ? settings.speechRecognition.apiKey : '',
       endpoint: preset.endpoint || '',
       modelName: preset.defaultModel || settings.speechRecognition.modelName || DEFAULT_SETTINGS.speechRecognition.modelName,
     },
@@ -412,6 +383,7 @@ export function applyVLMPreset(settings: AISettings, presetId: string): AISettin
       ...settings.vlm,
       useGeneralAI: false,
       useCustom: true,
+      apiKey: settings.vlm.endpoint === preset.endpoint ? settings.vlm.apiKey : '',
       endpoint: preset.endpoint,
       modelName: preset.defaultModel,
     },

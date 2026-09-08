@@ -21,8 +21,8 @@ let requestQueue: Promise<void> = Promise.resolve();
 const getLocalOCR = (): Promise<PaddleOCRInstance> => {
   if (!ocrPromise) {
     ocrPromise = PaddleOCR.create({
-      lang: 'ch',
-      ocrVersion: 'PP-OCRv5',
+      textDetectionModelName: 'PP-OCRv6_small_det',
+      textRecognitionModelName: 'PP-OCRv6_small_rec',
       textRecognitionBatchSize: 6,
       ortOptions: {
         backend: 'wasm',

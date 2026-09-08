@@ -458,7 +458,7 @@ test('runtime-specific model packs require every inference file before activatio
 
   const ppocr = normalizeInstalledModelPack({
     ...common,
-    id: 'ppocr-v5-mobile',
+    id: 'ppocr-v6-small',
     feature: 'ocr',
     runtime: 'onnxruntime-mobile',
     files: [

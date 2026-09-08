@@ -41,7 +41,7 @@ export interface SpeechRecognitionSettings {
 export interface ImageOCRSettings {
   provider: 'local-ppocr' | 'qwen' | 'custom';
   useGeneralAI?: boolean;
-  localModel?: 'ppocr-v5-mobile';
+  localModel?: 'ppocr-v6-small';
   apiKey: string;
   endpoint: string;
   modelName?: string;
@@ -84,7 +84,7 @@ export const DEFAULT_SETTINGS: AISettings = {
   generalAI: {
     apiKey: '',
     endpoint: '',
-    modelName: 'gpt-5.6-terra',
+    modelName: '',
     apiFormat: 'openai-chat',
   },
   provider: 'openai',
@@ -97,7 +97,7 @@ export const DEFAULT_SETTINGS: AISettings = {
   speechRecognition: {
     provider: 'web-speech',
     endpoint: '',
-    modelName: 'TeleAI/TeleSpeechASR',
+    modelName: '',
     enableRealtimeTranscription: true,
     localEngine: 'whisper',
     localModelPath: '',
@@ -113,10 +113,10 @@ export const DEFAULT_SETTINGS: AISettings = {
   imageOCR: {
     provider: 'local-ppocr',
     useGeneralAI: false,
-    localModel: 'ppocr-v5-mobile',
+    localModel: 'ppocr-v6-small',
     apiKey: '',
-    endpoint: DASHSCOPE_OCR_ENDPOINT,
-    modelName: 'qwen3.5-ocr',
+    endpoint: '',
+    modelName: '',
   },
   vlm: {
     useGeneralAI: true,
@@ -144,7 +144,7 @@ const normalizeEnum = <T extends string>(value: unknown, values: readonly T[], f
 const isHunyuanMT = (modelName: string): boolean => modelName.toLowerCase().includes('hunyuan-mt');
 
 const determineOutputMode = (settings: Partial<AISettings>): TranslationSettings['outputMode'] => {
-  const useTranslationService = Boolean(settings.apiKey && settings.endpoint && settings.modelName);
+  const useTranslationService = Boolean(hasProviderConnection(settings));
   const modelName = useTranslationService
     ? settings.modelName || ''
     : settings.generalAI?.modelName || '';
@@ -180,8 +180,8 @@ export function normalizeImageOCRSettings(settings?: Partial<ImageOCRSettings>):
     ...DEFAULT_SETTINGS.imageOCR,
     ...(settings || {}),
     provider: normalizeEnum(settings?.provider, IMAGE_OCR_PROVIDERS, DEFAULT_SETTINGS.imageOCR.provider),
-    localModel: 'ppocr-v5-mobile',
-    modelName: settings?.modelName?.trim() || DEFAULT_SETTINGS.imageOCR.modelName,
+    localModel: 'ppocr-v6-small',
+    modelName: settings?.modelName?.trim() || (settings?.provider === 'qwen' ? 'qwen3.5-ocr' : ''),
   };
 }
 
@@ -216,5 +216,21 @@ export function normalizeSettings(settings?: Partial<AISettings> | null): AISett
 }
 
 export function hasGeneralAISettings(settings: AISettings): boolean {
-  return Boolean(settings.generalAI.apiKey && settings.generalAI.endpoint && settings.generalAI.modelName);
+  return hasProviderConnection(settings.generalAI);
+}
+
+/** Keyless connections are limited to explicit local-network servers. */
+export function isLocalProviderEndpoint(endpoint: string): boolean {
+  try {
+    const url = new URL(endpoint);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return false;
+    const host = url.hostname.toLowerCase();
+    return host === 'localhost' || host === '[::1]' || host.endsWith('.local')
+      || /^127\.\d+\.\d+\.\d+$/.test(host) || /^10\.\d+\.\d+\.\d+$/.test(host)
+      || /^192\.168\.\d+\.\d+$/.test(host) || /^172\.(1[6-9]|2\d|3[01])\.\d+\.\d+$/.test(host);
+  } catch { return false; }
+}
+export function hasProviderConnection(config: { endpoint?: string; apiKey?: string; modelName?: string }): boolean {
+  return Boolean(config.endpoint?.trim() && config.modelName?.trim()
+    && (config.apiKey?.trim() || isLocalProviderEndpoint(config.endpoint)));
 }

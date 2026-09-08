@@ -27,6 +27,7 @@ const makeSettings = (patch: SettingsPatch = {}): AISettings => normalizeSetting
   speechRecognition: {
     ...DEFAULT_SETTINGS.speechRecognition,
     provider: 'siliconflow',
+    modelName: 'selected-asr',
     ...(patch.speechRecognition || {}),
   },
 });
@@ -173,4 +174,23 @@ test('transcribeAudioFile surfaces provider error text', async () => {
     })),
     /Audio transcription failed: provider exploded/,
   );
+});
+
+test('ASR never sends another provider key to a new endpoint and accepts keyless local ASR', async () => {
+  let calls = 0;
+  globalThis.fetch = async (_url, init) => {
+    calls++;
+    assert.equal(new Headers(init?.headers).has('authorization'), false);
+    assert.equal((init?.body as FormData).get('model'), 'local-asr');
+    return Response.json({ text: 'local result' });
+  };
+  const settings = makeSettings({ generalAI: { endpoint: 'https://general.example/v1', apiKey: 'private-key' }, speechRecognition: { endpoint: 'https://different.example/v1' } });
+  await assert.rejects(transcribeAudioFile(makeAudioBlob(), settings), /Speech API key/);
+  assert.equal(calls, 0);
+  settings.speechRecognition.endpoint = 'http://192.168.1.5:8080/v1';
+  settings.speechRecognition.modelName = '';
+  await assert.rejects(transcribeAudioFile(makeAudioBlob(), settings), /Speech model/);
+  settings.speechRecognition.modelName = 'local-asr';
+  assert.equal(await transcribeAudioFile(makeAudioBlob(), settings), 'local result');
+  assert.equal(calls, 1);
 });

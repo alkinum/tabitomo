@@ -62,7 +62,7 @@
 	<key>NSFaceIDUsageDescription</key>
 	<string>Allow $(PRODUCT_NAME) to access your Face ID biometric data.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Expo Dev Launcher uses the local network to discover and connect to development servers running on your computer.</string>
+	<string>Allow tabitomo to connect to AI models running on a computer on your local network.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Allow tabitomo to record speech for translation.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
@@ -101,5 +101,22 @@
 	<string>Automatic</string>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<false/>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+		<key>UISceneConfigurations</key>
+		<dict>
+			<key>UIWindowSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneConfigurationName</key>
+					<string>Default Configuration</string>
+					<key>UISceneDelegateClassName</key>
+					<string>TabitomoSceneDelegate</string>
+				</dict>
+			</array>
+		</dict>
+	</dict>
 </dict>
 </plist>

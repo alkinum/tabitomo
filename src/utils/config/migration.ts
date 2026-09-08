@@ -33,7 +33,8 @@ const normalizeSpeechRecognitionConfig = (speechRecognition: unknown): AIConfigV
 
   return {
     provider: normalizeSpeechProvider(oldSpeechRecognition.provider),
-    modelName: (oldSpeechRecognition.modelName as string | undefined) || 'TeleAI/TeleSpeechASR',
+    endpoint: (oldSpeechRecognition.endpoint as string | undefined) || '',
+    modelName: (oldSpeechRecognition.modelName as string | undefined) || '',
     enableRealtimeTranscription: (oldSpeechRecognition.enableRealtimeTranscription as boolean | undefined) ?? true,
     localEngine: normalizeEnum<LocalAsrEngine>(oldSpeechRecognition.localEngine, ['whisper', 'sensevoice'], 'whisper'),
     localModelPath: (oldSpeechRecognition.localModelPath as string | undefined) || '',
@@ -53,6 +54,10 @@ const normalizeCurrentConfig = (config: UnknownRecord): AIConfigV1 => ({
   ...(config as AIConfigV1),
   _version: CURRENT_SCHEMA_VERSION,
   speechRecognition: normalizeSpeechRecognitionConfig(config.speechRecognition),
+  imageOCR: {
+    ...((config.imageOCR as AIConfigV1['imageOCR'] | undefined) || {}),
+    localModel: 'ppocr-v6-small',
+  } as AIConfigV1['imageOCR'],
 });
 
 /**
@@ -92,7 +97,7 @@ const migrateV0ToV1: Migration<UnknownRecord, AIConfigV1> = {
       generalAI: {
         apiKey: (oldGeneralAI.apiKey as string | undefined) || '',
         endpoint: (oldGeneralAI.endpoint as string | undefined) || '',
-        modelName: (oldGeneralAI.modelName as string | undefined) || 'gpt-5.6-terra',
+        modelName: (oldGeneralAI.modelName as string | undefined) || '',
       },
       // Ensure translation exists with defaults
       translation: {
@@ -102,12 +107,12 @@ const migrateV0ToV1: Migration<UnknownRecord, AIConfigV1> = {
       speechRecognition: normalizeSpeechRecognitionConfig(oldConfig.speechRecognition),
       // Ensure imageOCR exists with defaults
       imageOCR: {
-        provider: (oldImageOCR.provider as 'qwen' | 'custom' | undefined) || 'qwen',
+        provider: (oldImageOCR.provider as 'local-ppocr' | 'qwen' | 'custom' | undefined) || 'local-ppocr',
         useGeneralAI: (oldImageOCR.useGeneralAI as boolean | undefined) ?? false,
-        localModel: 'ppocr-v5-mobile',
+        localModel: 'ppocr-v6-small',
         apiKey: (oldImageOCR.apiKey as string | undefined) || '',
-        endpoint: (oldImageOCR.endpoint as string | undefined) || 'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation',
-        modelName: (oldImageOCR.modelName as string | undefined) || 'qwen3.5-ocr',
+        endpoint: (oldImageOCR.endpoint as string | undefined) || '',
+        modelName: (oldImageOCR.modelName as string | undefined) || (oldImageOCR.provider === 'qwen' ? 'qwen3.5-ocr' : ''),
       },
       // Ensure vlm exists with defaults
       vlm: {

@@ -1,4 +1,4 @@
-import type { AISettings } from './settings';
+import { isLocalProviderEndpoint, type AISettings } from './settings';
 
 export interface NativeAudioFile {
   uri: string;
@@ -8,11 +8,15 @@ export interface NativeAudioFile {
 
 const appendPath = (endpoint: string, path: string): string => `${endpoint.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`;
 
-const getSpeechApiKey = (settings: AISettings): string => settings.speechRecognition.apiKey || settings.apiKey || settings.generalAI.apiKey;
-
-const getSpeechEndpoint = (settings: AISettings): string => (
-  settings.speechRecognition.endpoint || settings.endpoint || settings.generalAI.endpoint
-);
+/** Reuse a credential only when its configured base URL matches the speech service. */
+export function getSpeechConnection(settings: AISettings) {
+  const endpoint = (settings.speechRecognition.endpoint || settings.endpoint || settings.generalAI.endpoint).trim();
+  const sameEndpoint = (candidate: string) => candidate.trim().replace(/\/+$/, '') === endpoint.replace(/\/+$/, '');
+  const apiKey = settings.speechRecognition.apiKey?.trim()
+    || (sameEndpoint(settings.endpoint) ? settings.apiKey.trim() : '')
+    || (sameEndpoint(settings.generalAI.endpoint) ? settings.generalAI.apiKey.trim() : '');
+  return { endpoint, apiKey, modelName: settings.speechRecognition.modelName?.trim() || '' };
+}
 
 export async function transcribeAudioFile(
   file: Blob | NativeAudioFile,
@@ -23,26 +27,19 @@ export async function transcribeAudioFile(
     throw new Error('Local ASR must be handled by the platform native layer before calling cloud transcription.');
   }
 
-  const apiKey = getSpeechApiKey(settings);
-  const endpoint = getSpeechEndpoint(settings);
-  const modelName = settings.speechRecognition.modelName || 'TeleAI/TeleSpeechASR';
-
-  if (!apiKey) {
-    throw new Error('Speech API key is not configured');
-  }
-  if (!endpoint) {
-    throw new Error('Speech API endpoint is not configured');
-  }
+  const { apiKey, endpoint, modelName } = getSpeechConnection(settings);
+  if (!endpoint) throw new Error('Speech API endpoint is not configured');
+  if (!apiKey && !isLocalProviderEndpoint(endpoint)) throw new Error('Speech API key is not configured');
+  if (!modelName) throw new Error('Speech model is not configured');
 
   const formData = new FormData();
   formData.append('model', modelName);
-  formData.append('file', file as never);
+  if (file instanceof Blob) formData.append('file', file, 'name' in file && typeof file.name === 'string' ? file.name : file.type.includes('wav') ? 'audio.wav' : 'audio.webm');
+  else formData.append('file', file as never);
 
   const response = await fetch(appendPath(endpoint, 'audio/transcriptions'), {
     method: 'POST',
-    headers: {
-      authorization: `Bearer ${apiKey}`,
-    },
+    headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {},
     body: formData,
     signal: abortSignal,
   });

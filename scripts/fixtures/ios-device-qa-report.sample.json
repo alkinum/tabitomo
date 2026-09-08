@@ -133,7 +133,7 @@
       "label": "PP-OCR model",
       "status": "recorded",
       "outcome": "passed",
-      "result": "ppocr-v5-mobile inference completed with onnxruntime-mobile; lines=2; native=380 ms.",
+      "result": "ppocr-v6-small inference completed with onnxruntime-mobile; lines=2; native=380 ms.",
       "startedAt": "2026-07-09T02:10:16.900Z",
       "finishedAt": "2026-07-09T02:10:17.280Z",
       "durationMs": 380

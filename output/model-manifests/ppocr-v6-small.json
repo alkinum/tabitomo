@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "packs": [
+    {
+      "id": "ppocr-v6-small",
+      "feature": "ocr",
+      "runtime": "onnxruntime-mobile",
+      "version": "2026.07.14-runtime1",
+      "minAppVersion": "0.1.0",
+      "minIOS": "16.4",
+      "bytes": 31277677,
+      "license": "Apache-2.0",
+      "label": "PP-OCR v6 Small",
+      "description": "PP-OCR v6 Small files distributed by tabitomo for verified on-device download.",
+      "files": [
+        {
+          "name": "det.onnx",
+          "url": "https://assets.tabitomo.alkinum.io/models/ocr/ppocr-v6-small/files/2026.07.14-runtime1/det.onnx",
+          "sha256": "d73e0058b7a8086bbd57f3d10b8bcd4ff95363f67e06e2762b5e814fe9c9410e",
+          "bytes": 9880512
+        },
+        {
+          "name": "det.yml",
+          "url": "https://assets.tabitomo.alkinum.io/models/ocr/ppocr-v6-small/files/2026.07.14-runtime1/det.yml",
+          "sha256": "193f435274bf9f0b5f71a929bbfbcf148282df7e633b34e7c373e8f44741b516",
+          "bytes": 885
+        },
+        {
+          "name": "dict.txt",
+          "url": "https://assets.tabitomo.alkinum.io/models/ocr/ppocr-v6-small/files/2026.07.14-runtime1/dict.txt",
+          "sha256": "b5f2bfe2bdd9448429e3e82b51c789775d9b42f2403d082b00662eb77e401c5d",
+          "bytes": 74947
+        },
+        {
+          "name": "LICENSE.txt",
+          "url": "https://assets.tabitomo.alkinum.io/models/ocr/ppocr-v6-small/files/2026.07.14-runtime1/LICENSE.txt",
+          "sha256": "3840c5c0c61c294264d2dd77b8777be6ddd90121ef4e0e64abcd22edea581d6e",
+          "bytes": 11376
+        },
+        {
+          "name": "rec.onnx",
+          "url": "https://assets.tabitomo.alkinum.io/models/ocr/ppocr-v6-small/files/2026.07.14-runtime1/rec.onnx",
+          "sha256": "5435fd747c9e0efe15a96d0b378d5bd157e9492ed8fd80edf08f30d02fa24634",
+          "bytes": 21159378
+        },
+        {
+          "name": "rec.yml",
+          "url": "https://assets.tabitomo.alkinum.io/models/ocr/ppocr-v6-small/files/2026.07.14-runtime1/rec.yml",
+          "sha256": "ab078671bb49f06228eadccd34f1bb501e157f7a047095ffb943ba81512c77d1",
+          "bytes": 150579
+        }
+      ]
+    }
+  ]
+}

@@ -1,5 +1,12 @@
 # tabitomo Expo Universal App 需求跟进文档
 
+## 2026-09-08 design and provider revision
+
+Web and Expo now consume shared light/dark indigo tokens and shared settings normalization. Desktop uses two columns; phone uses native stacked panels. Settings and onboarding include OpenRouter browser authorization with pasted one-time code (PKCE, no callback URL), explicit live model discovery, editable model IDs, and direct completion after AI setup. OCR supports local geometry, General AI text extraction, custom compatible vision text extraction, and the existing explicit Qwen coordinate adapter. ASR accepts arbitrary compatible endpoints; blank model IDs no longer choose TeleAI, and credentials are reused only for the same base URL. Local-network model endpoints may omit a key. There is no bundled native VLM runtime or new claim of on-device benchmark superiority.
+
+This supersedes older ledger statements that cloud OCR only accepts Qwen, or that General AI/custom OCR is unavailable. Existing Qwen configs and the legacy `siliconflow` ASR enum remain import-compatible. See [design and model decisions](design-and-model-revision.zh-CN.md) for architecture, candidates, official sources and verification limits. Signed-device account/permissions/CloudKit/model quality checks remain required.
+
+
 状态：实现中
 分支：`expo-universal-parity`
 主目标：iOS 原生体验优先，Expo Web/Android 作为不拖慢 iOS 的次级目标
@@ -95,9 +102,9 @@
 | 首次设置 | 手动配置、快速填充、文件导入、QR 导入 | 初版完成；Expo web first-run/manual/import smoke 通过；iOS simulator 已覆盖 setup choice、manual translation setup、import setup 三个首次设置视觉场景，且 QR import 已覆盖 scanner callback/import/save 链路 | 真 iPhone 文件/真实相机 QR 解码验证 |
 | 音频 | 麦克风权限、录音、cloud ASR、Apple Speech/on-device Speech | 初版完成；iOS Release simulator mock speech-provider smoke 已覆盖 cloud ASR FileBlob multipart 上传链路；Device QA 已新增 Provider speech，用当前 speech settings 发送有效短 WAV fixture 做真 provider upload 检查；Web realtime/VAD 配置在 mobile 中保留兼容但禁用，iOS 当前明确使用 record-then-transcribe/native Speech baseline | 真 iPhone 麦克风/Apple Speech/真实云 ASR；custom native streaming ASR 另行决策 |
 | 图片 | 相机、相册、从文本进入图片时自动反转语言方向、压缩、OCR overlay、图片全屏 lightbox、VLM markdown | 初版完成；mobile Camera/Album 进入图片上下文时会像 Web text→image 一样交换源/目标语言，清空或离开图片上下文时恢复；Expo web mock provider 和 iOS Release simulator mock image-provider smoke 均已覆盖 VLM/OCR/OCR-line translation 核心链路；`image-lightbox` 已进入全量 iOS smoke 并覆盖全屏图片预览 | 真图片 OCR/VLM/overlay 对照 Web + 真 provider 验证 |
-| 本地 OCR | 下载的 PP-OCR v5 Mobile 通过 ONNX Runtime 执行；缺失/失效时 Apple Vision fallback | 初版完成；iOS Release 模拟器完整模型 smoke 已执行 PP-OCR detector/recognizer 并返回 1 行 | 真机菜单/招牌/收据、旋转/低光/小字、内存/延迟 QA |
+| 本地 OCR | 下载的 PP-OCR v6 Small 通过 ONNX Runtime 执行；缺失/失效时 Apple Vision fallback | 固定 R2 资产已发布；iOS Release 模拟器下载后通过 ONNX Runtime 返回 1 行，PP-OCR v5 已从 R2 移除 | 真机菜单、招牌、收据、旋转、低光、小字、内存和延迟 QA |
 | 本地 ASR | 下载的 Whisper Base/SenseVoice Small 通过 sherpa-onnx 执行；缺失/失效时 Apple on-device Speech fallback | 初版完成；iOS Release 模拟器完整模型 smoke 已分别执行 Whisper Base 和 SenseVoice Small | 真机多语言、噪声、内存/延迟/离线 QA |
-| 本地模型 | 固定 R2 manifest、下载、校验、native load 验证、安装、替换、unload/delete、兼容性状态、确定性激活选择 | 初版完成；Mobile 不暴露 path/manifest URL，R2 资产 125 checks 通过，三个固定官方模型的 iOS Release runtime smoke 通过 | 签名真机完整下载/重启/离线/推理 QA |
+| 本地模型 | 固定 R2 manifest、下载、校验、native load 验证、安装、替换、unload/delete、兼容性状态、确定性激活选择 | 初版完成；Mobile 不暴露 path/manifest URL；当前三个固定模型通过 125 项远端资产检查和 iOS Release runtime smoke | 签名真机完整下载/重启/离线/推理 QA |
 | Expo web | 不拖慢 iOS 的 universal web export/smoke | 初版完成；最新 `pnpm test:mobile:web-smoke` 通过 | 保持 smoke 跟随核心功能变化 |
 
 ## 关键缺口

@@ -22,7 +22,7 @@ export const TABITOMO_MODEL_ASSET_ORIGIN = 'https://assets.tabitomo.alkinum.io';
 export type OfflineModelId =
   | 'whisper-base'
   | 'sensevoice-small'
-  | 'ppocr-v5-mobile';
+  | 'ppocr-v6-small';
 
 export interface OfflineModelDefinition {
   id: OfflineModelId;
@@ -43,7 +43,7 @@ export const OFFLINE_MODEL_DEFINITIONS: readonly OfflineModelDefinition[] = [
     packId: 'whisper-base',
     label: 'Whisper Base',
     feature: 'asr',
-    description: 'Balanced offline speech recognition for travel use.',
+    description: 'About 153 MB · Broad multilingual coverage; a starting point for travel.',
     manifestUrl: modelManifestUrl('asr', 'whisper-base'),
   },
   {
@@ -51,16 +51,16 @@ export const OFFLINE_MODEL_DEFINITIONS: readonly OfflineModelDefinition[] = [
     packId: 'sensevoice-small',
     label: 'SenseVoice Small',
     feature: 'asr',
-    description: 'Multilingual offline speech recognition with ITN support.',
+    description: 'About 228 MB · Chinese, Cantonese, English, Japanese and Korean.',
     manifestUrl: modelManifestUrl('asr', 'sensevoice-small'),
   },
   {
-    id: 'ppocr-v5-mobile',
-    packId: 'ppocr-v5-mobile',
-    label: 'PP-OCR v5 Mobile',
+    id: 'ppocr-v6-small',
+    packId: 'ppocr-v6-small',
+    label: 'PP-OCR v6 Small',
     feature: 'ocr',
-    description: 'On-device text detection and recognition for images.',
-    manifestUrl: modelManifestUrl('ocr', 'ppocr-v5-mobile'),
+    description: 'About 30 MB · Text and positions on device; Apple Vision fallback on iOS.',
+    manifestUrl: modelManifestUrl('ocr', 'ppocr-v6-small'),
   },
 ] as const;
 
