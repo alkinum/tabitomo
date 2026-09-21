@@ -123,6 +123,7 @@ const parseArgs = () => {
       case '--help':
         console.log(usage);
         process.exit(0);
+        break;
       default:
         fail(`Unknown option: ${argument}\n\n${usage}`);
     }

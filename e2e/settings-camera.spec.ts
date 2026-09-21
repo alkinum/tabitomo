@@ -26,3 +26,24 @@ test('leaving the Data tab releases the scanner camera', async ({ page }) => {
   await expect.poll(() => page.evaluate(() => (window as unknown as { qrTestStreams: MediaStream[] }).qrTestStreams.every(stream => stream.getTracks().every(track => track.readyState === 'ended')))).toBe(true);
   await expect(page.getByLabel('Provider', { exact: true })).toBeVisible();
 });
+
+test('first-run QR scanner opens and releases the camera on dismiss', async ({ page }) => {
+  await page.addInitScript(() => {
+    const streams: MediaStream[] = [];
+    Object.defineProperty(window, 'qrTestStreams', { value: streams });
+    const getUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+    navigator.mediaDevices.getUserMedia = async constraints => {
+      const stream = await getUserMedia(constraints);
+      streams.push(stream);
+      return stream;
+    };
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Import Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Scan QR', exact: true }).click();
+  await page.getByLabel('Password', { exact: true }).fill('scanner-test-password');
+  await page.getByRole('button', { name: 'Start Scanning', exact: true }).click();
+  await expect.poll(() => page.locator('#qr-reader-wizard video').evaluateAll(videos => videos.some(video => (video as HTMLVideoElement).readyState >= 2))).toBe(true);
+  await page.getByRole('button', { name: 'Skip for now', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { qrTestStreams: MediaStream[] }).qrTestStreams.every(stream => stream.getTracks().every(track => track.readyState === 'ended')))).toBe(true);
+});

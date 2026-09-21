@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { readTranslationText } from './result-text';
 
 // Route provider requests at the page boundary, including WebKit after PWA activation.
 test.use({ serviceWorkers: 'block' });
@@ -93,7 +94,7 @@ test('OpenRouter API key, vision catalog selection, and manual provider fallback
     return route.fulfill({ headers: corsHeaders, json: { output_text: '駅はこちらです' } });
   });
   await page.getByRole('textbox', { name: 'Source text' }).fill('Where is the station?');
-  await expect(page.getByRole('region', { name: 'Translation', exact: true })).toContainText('駅はこちらです');
+  await expect.poll(() => readTranslationText(page)).toContain('駅はこちらです');
   expect(chatCalls).toBe(1);
   expect(responsesCalls).toBe(1);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();

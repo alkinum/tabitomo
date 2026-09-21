@@ -6,12 +6,12 @@ import globals from 'globals';
 
 export default [
   {
-    ignores: ['dist/**', 'node_modules/**'],
+    ignores: ['dist/**', '**/node_modules/**', 'output/**', 'test-results/**', 'playwright-report/**', 'apps/mobile/ios/**', 'apps/mobile/.expo/**'],
   },
   js.configs.recommended,
   ...tsPlugin.configs['flat/recommended'],
   {
-    files: ['**/*.{js,jsx,ts,tsx}'],
+    files: ['**/*.{js,mjs,cjs,jsx,ts,tsx}'],
     languageOptions: {
       ecmaVersion: 2020,
       globals: {
@@ -32,6 +32,22 @@ export default [
         'warn',
         { allowConstantExport: true },
       ],
+    },
+  },
+  {
+    files: ['scripts/**/*.{js,mjs,ts}', 'e2e/**/*.ts', 'apps/mobile/plugins/*.js'],
+    languageOptions: { globals: globals.node },
+  },
+  {
+    files: ['apps/mobile/plugins/*.js'],
+    languageOptions: { sourceType: 'commonjs' },
+    rules: { '@typescript-eslint/no-require-imports': 'off' },
+  },
+  {
+    files: ['apps/mobile/**/*.{ts,tsx}'],
+    rules: {
+      '@typescript-eslint/no-require-imports': ['error', { allow: ['\\.png$'] }],
+      'react-refresh/only-export-components': 'off',
     },
   },
   {

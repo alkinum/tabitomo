@@ -7,9 +7,10 @@ export const saveSettings = (settings: AISettings): void => {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(normalizeSettings(settings)));
 };
 export const loadSettings = (): AISettings | null => {
-  const stored = localStorage.getItem(SETTINGS_KEY);
-  if (!stored) return null;
-  try { return normalizeSettings(JSON.parse(stored)); }
+  try {
+    const stored = localStorage.getItem(SETTINGS_KEY);
+    return stored ? normalizeSettings(JSON.parse(stored)) : null;
+  }
   catch { return null; }
 };
 export const hasSettings = (): boolean => loadSettings() !== null;

@@ -222,6 +222,23 @@ await includesAll('src/components/TranslationTool.tsx', 'Web text/image source f
   ['copy result', 'copyToClipboard'],
   ['copy success state', 'const [copied, setCopied]'],
   ['copy success timeout', 'setTimeout(() => setCopied(false), 2000)'],
+  ['cancel language changes', "changeLanguage('target', value as LanguageCode)"],
+  ['invalidate provider cache', 'translationCacheRef.current.clear()'],
+  ['speech session isolation', 'recordingSessionRef'],
+  ['release microphone tracks', 'recorder.stream.getTracks().forEach(track => track.stop())'],
+  ['stop audio action', "isSpeaking ? 'Stop audio' : 'Play audio'"],
+  ['image selection isolation', 'selection !== imageSelectionRef.current'],
+]);
+
+await includesAll('src/components/WelcomeWizard.tsx', 'Web setup recovery', [
+  ['QR camera container', 'id="qr-reader-wizard"'],
+  ['scanner lifecycle', 'scannerGeneration'],
+  ['save failure feedback', 'saveError && <p role="alert"'],
+]);
+
+await includesAll('src/utils/language/japanese.ts', 'Web annotation safety', [
+  ['escape source markup', 'escapedText'],
+  ['escape fallback', 'return escapedText'],
 ]);
 
 await includesAll('apps/mobile/App.tsx', 'Mobile text/image parity features', [
@@ -240,6 +257,9 @@ await includesAll('apps/mobile/App.tsx', 'Mobile text/image parity features', [
   ['TTS action', 'Speech.speak'],
   ['cancel work on input changes', 'onChangeText={handleEditSource}'],
   ['cancel image requests', 'imageActionAbortRef.current?.abort()'],
+  ['large-text scrollable navigation', '{usesLargeText && workspaceNavigation}'],
+  ['bounded wordmark scaling', 'maxFontSizeMultiplier={1.3}'],
+  ['large-text language labels', 'numberOfLines={fontScale > 1.3 ? undefined : 1}'],
   ['stop result audio', "label={isSpeaking ? 'Stop audio' : 'Listen'}"],
   ['settings save feedback', 'Could not save settings. Try again.'],
   ['same-language assistant requests', "mode === 'translation' && sourceLang === targetLang"],

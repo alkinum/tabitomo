@@ -10,20 +10,18 @@ let initPromise: Promise<void> | null = null;
  * This is async and only needs to be done once
  */
 async function initKuroshiro(): Promise<void> {
-  if (kuroshiroInstance) {
-    return;
-  }
-
   if (initPromise) {
     return initPromise;
   }
+  if (kuroshiroInstance) return;
 
   initPromise = (async () => {
-    kuroshiroInstance = new Kuroshiro();
-    await kuroshiroInstance.init(new KuromojiAnalyzer({
+    const instance = new Kuroshiro();
+    await instance.init(new KuromojiAnalyzer({
       dictPath: '/kuromoji/dict/'
     }));
-  })();
+    kuroshiroInstance = instance;
+  })().finally(() => { initPromise = null; });
 
   return initPromise;
 }
@@ -38,6 +36,9 @@ export async function addFuriganaAnnotations(text: string): Promise<string> {
     return '';
   }
 
+  // Kuroshiro emits ruby markup but does not escape source text. Escape before
+  // conversion, including the dictionary-failure fallback, before rendering HTML.
+  const escapedText = text.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
   try {
     // Initialize kuroshiro if not already done
     await initKuroshiro();
@@ -47,7 +48,7 @@ export async function addFuriganaAnnotations(text: string): Promise<string> {
     }
 
     // Convert to furigana using ruby mode
-    const result = await kuroshiroInstance.convert(text, {
+    const result = await kuroshiroInstance.convert(escapedText, {
       mode: 'furigana',
       to: 'hiragana',
     });
@@ -56,7 +57,7 @@ export async function addFuriganaAnnotations(text: string): Promise<string> {
   } catch (error) {
     console.error('Furigana conversion error:', error);
     // Return original text if conversion fails
-    return text;
+    return escapedText;
   }
 }
 

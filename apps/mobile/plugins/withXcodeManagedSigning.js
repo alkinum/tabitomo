@@ -12,7 +12,7 @@ module.exports = function withXcodeManagedSigning(config, options = {}) {
 
   result = withPodfile(result, (modConfig) => {
     if (!modConfig.modResults.contents.includes('tabitomo-ios-floor')) {
-      const ending = /\n  end\nend\s*$/;
+      const ending = /\n {2}end\nend\s*$/;
       if (!ending.test(modConfig.modResults.contents)) throw new Error('Review the Podfile post_install hook before applying the iOS minimum.');
       modConfig.modResults.contents = modConfig.modResults.contents.replace(ending, `
     # tabitomo-ios-floor: dependency resources must support the app's minimum iOS.

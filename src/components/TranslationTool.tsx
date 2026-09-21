@@ -1,13 +1,15 @@
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { hasProviderConnection } from '../utils/config/settings';
-import React, { useEffect, useState, useRef, lazy, Suspense } from 'react';
+import React, { useEffect, useState, useRef, useCallback, lazy, Suspense } from 'react';
 import { translateText, SUPPORTED_LANGUAGES, type LanguageCode } from '../utils/translation/translation';
-import { speakText, getSpeechLocale } from '../utils/audio/speech';
+import { speakText, stopSpeaking, getSpeechLocale } from '../utils/audio/speech';
 import { transcribeCloudAudio } from '../utils/audio/audioTranscription';
 import { RealtimeTranscriptionService } from '../utils/audio/realtimeTranscription';
 import { localAsrService } from '../utils/audio/localAsr';
 import { performOCR, imageToBase64, streamTranslateImageWithVLM } from '../utils/image/imageOcr';
+import { getSpeechConnection } from '../../packages/tabitomo-core/src/speech';
+import { isLocalProviderEndpoint } from '../utils/config/settings';
 import { supportsOCROverlay } from '../../packages/tabitomo-core/src/inputOptions';
 import { explainWord, quickQA } from '../utils/translation/explanation';
 import { Mic, Image as ImageIcon, ArrowLeftRight, X, Copy, Check, Volume2, Camera, Keyboard, Settings, Loader2 } from 'lucide-react';
@@ -83,19 +85,25 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
   // Text state
   const [sourceText, setSourceText] = useState('');
   const [targetText, setTargetText] = useState('');
-  const [furiganaHtml, setFuriganaHtml] = useState<string | null>(null);
+  const [furiganaHtml, setFuriganaHtml] = useState<{ text: string; html: string } | null>(null);
   // UI state
   const [inputMethod, setInputMethod] = useState<InputMethod>('text');
   const [textMode, setTextMode] = useState<TextMode>('translation');
   const [isTranslating, setIsTranslating] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copyGenerationRef = useRef(0);
   const [error, setError] = useState<string | null>(null);
   // Recording state
   const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const recordingSessionRef = useRef(0);
+  const recordingStartingRef = useRef(false);
+  const audioAbortRef = useRef<AbortController | null>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
   const realtimeTranscriptionRef = useRef<RealtimeTranscriptionService | null>(null);
   const [interimTranscript, setInterimTranscript] = useState('');
   const realtimeTranslationTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -116,11 +124,84 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
   const explanationAbortControllerRef = useRef<AbortController | null>(null);
   const qaAbortControllerRef = useRef<AbortController | null>(null);
   const imageAbortControllerRef = useRef<AbortController | null>(null);
+  const imageSelectionRef = useRef(0);
   // Translation cache
   const translationCacheRef = useRef<Map<string, CachedTranslation>>(new Map());
   const speechProvider = settings.speechRecognition.provider;
   // Toast hook
   const { toast } = useToast();
+
+  const cancelAudio = useCallback(() => {
+    recordingSessionRef.current += 1;
+    recordingStartingRef.current = false;
+    audioAbortRef.current?.abort();
+    audioAbortRef.current = null;
+    if (realtimeTranslationTimerRef.current) clearTimeout(realtimeTranslationTimerRef.current);
+    const recognition = recognitionRef.current;
+    recognitionRef.current = null;
+    if (recognition) {
+      recognition.onresult = () => {};
+      recognition.onerror = () => {};
+      recognition.onend = () => {};
+      try { recognition.stop(); } catch { /* Already stopped. */ }
+    }
+    const recorder = mediaRecorderRef.current;
+    mediaRecorderRef.current = null;
+    if (recorder) {
+      recorder.onstop = null;
+      if (recorder.state !== 'inactive') recorder.stop();
+      recorder.stream.getTracks().forEach(track => track.stop());
+    }
+    const realtime = realtimeTranscriptionRef.current;
+    realtimeTranscriptionRef.current = null;
+    if (realtime) void realtime.stop().catch(() => {});
+    setIsRecording(false);
+    setIsTranscribing(false);
+    setInterimTranscript('');
+  }, []);
+  useEffect(() => cancelAudio, [settings, inputMethod, sourceLang, targetLang, textMode, cancelAudio]);
+
+  const cancelWorkspaceRequest = useCallback(() => {
+    imageSelectionRef.current += 1;
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    debounceTimerRef.current = null;
+    for (const ref of [translationAbortControllerRef, explanationAbortControllerRef, qaAbortControllerRef, imageAbortControllerRef]) {
+      ref.current?.abort();
+      ref.current = null;
+    }
+    setIsTranslating(false);
+    setIsProcessingImage(false);
+    setIsThinking(false);
+    setError(null);
+  }, []);
+
+  useEffect(() => {
+    cancelWorkspaceRequest();
+    translationCacheRef.current.clear();
+    setTargetText('');
+    setTranslatedImage(null);
+    return cancelWorkspaceRequest;
+  }, [settings, cancelWorkspaceRequest]);
+
+  useEffect(() => {
+    copyGenerationRef.current += 1;
+    setCopied(false);
+    setIsSpeaking(false);
+    stopSpeaking();
+    return () => {
+      copyGenerationRef.current += 1;
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      stopSpeaking();
+    };
+  }, [targetText, targetLang]);
+
+  const changeLanguage = (side: 'source' | 'target', language: LanguageCode) => {
+    cancelWorkspaceRequest();
+    setTargetText('');
+    setTranslatedImage(null);
+    if (side === 'source') setSourceLang(language);
+    else setTargetLang(language);
+  };
 
   // Check if general AI service is configured
   const isGeneralAIConfigured = () => {
@@ -164,10 +245,7 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
   const handleInputMethodChange = (method: InputMethod) => {
     const previousMethod = inputMethod;
     setInputMethod(method);
-    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
-    translationAbortControllerRef.current?.abort(); explanationAbortControllerRef.current?.abort();
-    qaAbortControllerRef.current?.abort(); imageAbortControllerRef.current?.abort();
-    setIsTranslating(false); setIsProcessingImage(false);
+    cancelWorkspaceRequest();
     // Reset text mode when changing input method
     setTextMode('translation');
     // Clear all inputs and outputs
@@ -254,26 +332,30 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
     }
   };
 
-  // Generate furigana HTML when target text changes and target is Japanese
+  // Ignore annotation work for an old result or a streamed Markdown response.
   useEffect(() => {
-    if (targetText && targetLang === 'ja') {
-      // Dynamically import Japanese utilities only when needed
-      import('../utils/language/japanese').then(({ addFuriganaAnnotations }) => {
-        addFuriganaAnnotations(targetText).then(html => {
-          setFuriganaHtml(html);
-        });
-      });
-    } else {
-      setFuriganaHtml(null);
+    let active = true;
+    setFuriganaHtml(null);
+    if (targetText && targetLang === 'ja' && inputMethod === 'text' && textMode === 'translation') {
+      void import('../utils/language/japanese').then(({ addFuriganaAnnotations }) => addFuriganaAnnotations(targetText))
+        .then(html => { if (active) setFuriganaHtml({ text: targetText, html }); })
+        .catch(() => { if (active) setFuriganaHtml(null); });
     }
-  }, [targetText, targetLang]);
+    return () => { active = false; };
+  }, [targetText, targetLang, inputMethod, textMode]);
 
   // Handle language swap
   const handleSwapLanguages = () => {
+    cancelWorkspaceRequest();
+    setTranslatedImage(null);
     setSourceLang(targetLang);
     setTargetLang(sourceLang);
-    setSourceText(targetText);
-    setTargetText(sourceText);
+    if (inputMethod !== 'image') {
+      setSourceText(targetText);
+      setTargetText(sourceText);
+    } else {
+      setTargetText('');
+    }
     // Add a little animation to the swap button
     const swapButton = document.getElementById('swap-button');
     if (swapButton) {
@@ -300,6 +382,7 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
       return;
     }
 
+    cancelWorkspaceRequest();
     // Check cache first
     const cachedResult = getCachedTranslation(text, from, to);
     if (cachedResult) {
@@ -330,7 +413,7 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
       }
     } catch (error) {
       // Don't show error if request was cancelled
-      if (error instanceof Error && error.name === 'AbortError') {
+      if (abortController.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
         console.log('[Translation] Request was cancelled');
         return;
       }
@@ -407,7 +490,7 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
       }
     } catch (error) {
       // Don't show error if request was cancelled
-      if (error instanceof Error && error.name === 'AbortError') {
+      if (abortController.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
         console.log('[Explanation] Request was cancelled');
         return;
       }
@@ -486,7 +569,7 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
       }
     } catch (error) {
       // Don't show error if request was cancelled
-      if (error instanceof Error && error.name === 'AbortError') {
+      if (abortController.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
         console.log('[Q/A] Request was cancelled');
         return;
       }
@@ -513,8 +596,9 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
   const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newText = e.target.value;
     setSourceText(newText);
-    translationAbortControllerRef.current?.abort(); explanationAbortControllerRef.current?.abort(); qaAbortControllerRef.current?.abort();
-    setIsTranslating(false); setError(null); setTargetText('');
+    cancelAudio();
+    cancelWorkspaceRequest();
+    setTargetText('');
 
     // Clear previous timer
     if (debounceTimerRef.current) {
@@ -536,265 +620,174 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
       setTargetText('');
     }
   };
-  // Handle copy to clipboard
-  const copyToClipboard = () => {
+  // Copy feedback belongs to the result that was actually copied.
+  const copyToClipboard = async () => {
     if (!targetText) return;
-    navigator.clipboard.writeText(targetText).then(() => {
+    const generation = ++copyGenerationRef.current;
+    try {
+      await navigator.clipboard.writeText(targetText);
+      if (generation !== copyGenerationRef.current) return;
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast({ variant: 'destructive', title: 'Copy failed', description: 'Allow clipboard access or select and copy the text.' });
+    }
   };
-  // Handle audio recording
+  const toggleSpeech = () => {
+    if (isSpeaking) { stopSpeaking(); setIsSpeaking(false); return; }
+    try {
+      const started = speakText(targetText, targetLang, () => setIsSpeaking(false));
+      setIsSpeaking(started);
+      if (!started) toast({ variant: 'destructive', title: 'Audio unavailable', description: 'Speech playback is not available in this browser.' });
+    } catch {
+      setIsSpeaking(false);
+      toast({ variant: 'destructive', title: 'Audio unavailable', description: 'Could not start speech playback. Try again.' });
+    }
+  };
+  // Scope every permission prompt, transcript and media callback to its recording.
   const startRecording = async () => {
-    // Clear existing text when starting new recording
-    setSourceText('');
-    setTargetText('');
-    setError(null);
-
-    setIsRecording(true);
-    setInterimTranscript('');
-
+    if (recordingStartingRef.current || isRecording || isTranscribing) return;
     if (speechProvider === 'local' && !settings.speechRecognition.localModelPath?.trim()) {
-      setIsRecording(false);
-      toast({
-        variant: "destructive",
-        title: "Local Model Required",
-        description: "Set a sherpa-onnx model directory in Speech settings before using local voice input.",
-        action: (
-          <button
-            onClick={() => onOpenSettings('speech')}
-            className="px-3 py-1.5 bg-white text-indigo-600 text-xs rounded-lg hover:bg-indigo-50"
-          >
-            Open Settings
-          </button>
-        ),
-      });
+      setError('Set a local model directory in Speech settings before recording.');
+      onOpenSettings('speech');
       return;
     }
-
-    // Use cloud or local transcription providers when configured
-    if (speechProvider === 'openai-compatible' || speechProvider === 'local') {
-      // Check if realtime transcription is enabled
-      const useRealtime = settings.speechRecognition.enableRealtimeTranscription !== false;
-
-      if (useRealtime) {
-        // Use realtime transcription with VAD
-        console.log('[Realtime] Starting realtime transcription...');
-        try {
-          // Helper to determine if source language uses spaces
-          const sourceLangUsesSpaces = !['zh', 'ja', 'ko'].includes(sourceLang);
-
-          let accumulatedTranscript = '';
-          realtimeTranscriptionRef.current = new RealtimeTranscriptionService(settings, {
-            sourceLang,
-            onTranscript: (text: string, isFinal: boolean) => {
-              console.log('[Realtime] Received transcript:', text, 'isFinal:', isFinal);
-
-              if (isFinal) {
-                // Final transcript - append to source text
-                const separator = sourceLangUsesSpaces ? ' ' : '';
-                accumulatedTranscript = accumulatedTranscript ? accumulatedTranscript + separator + text : text;
-                setSourceText(accumulatedTranscript);
-
-                // Clear interim transcript
-                setInterimTranscript('');
-
-                // Debounce translation to avoid too many API calls
-                if (realtimeTranslationTimerRef.current) {
-                  clearTimeout(realtimeTranslationTimerRef.current);
-                }
-
-                realtimeTranslationTimerRef.current = setTimeout(() => {
-                  const currentText = accumulatedTranscript;
-                  if (currentText.trim()) {
-                    runCurrentText(currentText.trim());
-                  }
-                }, 800); // Wait 800ms after last final transcript before translating
-              } else {
-                // Interim result - show as preview
-                setInterimTranscript(text);
-              }
-            },
-            onError: (error: Error) => {
-              console.error('[Realtime] Error:', error);
-              setError(error.message);
-            },
-          });
-
-          await realtimeTranscriptionRef.current.start();
-          console.log('[Realtime] Realtime transcription started');
-        } catch (err) {
-          console.error('[Realtime] Failed to start realtime transcription:', err);
-
-          // Check if it's a permission error
-          if (err instanceof Error &&
-              (err.name === 'NotAllowedError' ||
-               err.name === 'PermissionDeniedError' ||
-               err.message.includes('Permission denied') ||
-               err.message.includes('permission'))) {
-            toast({
-              variant: "destructive",
-              title: "Microphone Permission Denied",
-              description: "Please allow microphone access in your browser settings to use voice input.",
-            });
-          } else {
-            setError('Failed to access microphone for realtime transcription');
-          }
-          setIsRecording(false);
-        }
-      } else {
-        // Use traditional recording (wait for full audio)
-        console.log('[Audio] Starting traditional audio recording...');
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          audioChunksRef.current = [];
-
-          const mediaRecorder = new MediaRecorder(stream);
-          mediaRecorderRef.current = mediaRecorder;
-
-          mediaRecorder.ondataavailable = (event) => {
-            if (event.data.size > 0) {
-              audioChunksRef.current.push(event.data);
-            }
-          };
-
-          mediaRecorder.onstop = async () => {
-            const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-
-            try {
-              const transcribedText = speechProvider === 'local'
-                ? await localAsrService.transcribeBlob(audioBlob, settings, { sourceLang })
-                : await transcribeCloudAudio(audioBlob, settings);
-              setSourceText(transcribedText);
-              if (transcribedText) {
-                runCurrentText(transcribedText);
-              }
-            } catch (err) {
-              console.error('Transcription error:', err);
-              setError(err instanceof Error ? err.message : 'Transcription failed');
-            }
-
-            // Stop all tracks
-            stream.getTracks().forEach(track => track.stop());
-          };
-
-          mediaRecorder.start();
-        } catch (err) {
-          console.error('Failed to start recording:', err);
-
-          // Check if it's a permission error
-          if (err instanceof Error &&
-              (err.name === 'NotAllowedError' ||
-               err.name === 'PermissionDeniedError' ||
-               err.message.includes('Permission denied') ||
-               err.message.includes('permission'))) {
-            toast({
-              variant: "destructive",
-              title: "Microphone Permission Denied",
-              description: "Please allow microphone access in your browser settings to use voice input.",
-            });
-          } else {
-            setError('Failed to access microphone');
-          }
-          setIsRecording(false);
-        }
+    if (speechProvider === 'openai-compatible') {
+      const connection = getSpeechConnection(settings);
+      if (!connection.endpoint || !connection.modelName || (!connection.apiKey && !isLocalProviderEndpoint(connection.endpoint))) {
+        setError('Configure the speech endpoint, model and API key before recording.');
+        onOpenSettings('speech');
+        return;
       }
-    } else {
-      // Use Web Speech API
-      const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
-
-      if (SpeechRecognitionAPI) {
-        recognitionRef.current = new SpeechRecognitionAPI();
-
-        // Set language using proper locale
-        recognitionRef.current.lang = getSpeechLocale(sourceLang);
-        recognitionRef.current.continuous = true;
-        recognitionRef.current.interimResults = true;
-        recognitionRef.current.maxAlternatives = 1;
-
-        recognitionRef.current.onresult = (event: SpeechRecognitionEvent) => {
-          const transcript = Array.from(event.results)
-            .map((result: SpeechRecognitionResult) => result[0].transcript)
-            .join('');
+    }
+    cancelAudio();
+    cancelWorkspaceRequest();
+    const session = ++recordingSessionRef.current;
+    const current = () => session === recordingSessionRef.current;
+    recordingStartingRef.current = true;
+    setSourceText(''); setTargetText(''); setInterimTranscript('');
+    setIsRecording(true);
+    try {
+      if (speechProvider === 'web-speech') {
+        const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognitionAPI) throw new Error('Voice recognition is not supported in this browser.');
+        const recognition = new SpeechRecognitionAPI();
+        recognitionRef.current = recognition;
+        recognition.lang = getSpeechLocale(sourceLang);
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.maxAlternatives = 1;
+        let transcript = '';
+        recognition.onresult = event => {
+          if (!current()) return;
+          transcript = Array.from(event.results).map(result => result[0].transcript).join('');
           setSourceText(transcript);
         };
-
-        recognitionRef.current.onerror = (event: SpeechRecognitionErrorEvent) => {
-          console.error('Speech recognition error:', event.error);
-
-          // Check if it's a permission error
-          if (event.error === 'not-allowed' || event.error === 'audio-capture') {
-            toast({
-              variant: "destructive",
-              title: "Microphone Permission Denied",
-              description: "Please allow microphone access in your browser settings to use voice input.",
-            });
-          } else {
-            setError(`Voice recognition error: ${event.error}`);
-          }
-          setIsRecording(false);
+        recognition.onerror = event => {
+          if (!current()) return;
+          cancelAudio();
+          setError(event.error === 'not-allowed' || event.error === 'audio-capture'
+            ? 'Allow microphone access in your browser settings to use voice input.'
+            : `Voice recognition error: ${event.error}`);
         };
-
-        recognitionRef.current.onend = () => {
+        recognition.onend = () => {
+          if (!current()) return;
+          recognitionRef.current = null;
           setIsRecording(false);
+          if (transcript.trim()) runCurrentText(transcript.trim());
         };
-
-        try {
-          recognitionRef.current.start();
-        } catch (err) {
-          console.error('Failed to start recognition:', err);
-          setError('Failed to start voice recognition');
-          setIsRecording(false);
-        }
-      } else {
-        setError('Voice recognition is not supported in this browser');
-        setIsRecording(false);
+        recognition.start();
+        return;
       }
+      if (settings.speechRecognition.enableRealtimeTranscription !== false) {
+        let transcript = '';
+        const realtime = new RealtimeTranscriptionService(settings, {
+          sourceLang,
+          onTranscript: (text, isFinal) => {
+            if (!current()) return;
+            if (!isFinal) { setInterimTranscript(text); return; }
+            const separator = ['zh', 'zh-Hant', 'ja', 'ko'].includes(sourceLang) ? '' : ' ';
+            transcript = transcript ? transcript + separator + text : text;
+            setSourceText(transcript); setInterimTranscript('');
+            if (realtimeTranslationTimerRef.current) clearTimeout(realtimeTranslationTimerRef.current);
+            realtimeTranslationTimerRef.current = setTimeout(() => {
+              if (current() && transcript.trim()) runCurrentText(transcript.trim());
+            }, 800);
+          },
+          onError: error => { if (current()) setError(error.message); },
+        });
+        realtimeTranscriptionRef.current = realtime;
+        await realtime.start();
+        if (!current()) await realtime.stop();
+        return;
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!current()) { stream.getTracks().forEach(track => track.stop()); return; }
+      try {
+        const recorder = new MediaRecorder(stream);
+        mediaRecorderRef.current = recorder;
+        const chunks: Blob[] = [];
+        recorder.ondataavailable = event => { if (event.data.size > 0) chunks.push(event.data); };
+        recorder.onstop = async () => {
+          stream.getTracks().forEach(track => track.stop());
+          if (!current()) return;
+          mediaRecorderRef.current = null;
+          setIsRecording(false); setIsTranscribing(true);
+          const controller = new AbortController();
+          audioAbortRef.current = controller;
+          try {
+            const blob = new Blob(chunks, { type: recorder.mimeType || chunks[0]?.type || 'audio/webm' });
+            const text = speechProvider === 'local'
+              ? await localAsrService.transcribeBlob(blob, settings, { sourceLang })
+              : await transcribeCloudAudio(blob, settings, controller.signal);
+            if (current()) { setSourceText(text); if (text.trim()) runCurrentText(text); }
+          } catch (error) {
+            if (current() && !controller.signal.aborted) setError(error instanceof Error ? error.message : 'Transcription failed');
+          } finally {
+            if (current()) { audioAbortRef.current = null; setIsTranscribing(false); }
+          }
+        };
+        recorder.start();
+      } catch (error) {
+        stream.getTracks().forEach(track => track.stop());
+        throw error;
+      }
+    } catch (error) {
+      if (current()) {
+        cancelAudio();
+        setError(error instanceof Error ? error.message : 'Could not start voice input.');
+      }
+    } finally {
+      if (current()) recordingStartingRef.current = false;
     }
   };
 
   const stopRecording = async () => {
-    setIsRecording(false);
-
-    // Clear any pending translation timer
-    if (realtimeTranslationTimerRef.current) {
-      clearTimeout(realtimeTranslationTimerRef.current);
-      realtimeTranslationTimerRef.current = null;
-    }
-
-    // Stop realtime transcription if active
-    if (realtimeTranscriptionRef.current && realtimeTranscriptionRef.current.isActive()) {
-      console.log('[Realtime] Stopping realtime transcription...');
-      const finalTranscript = await realtimeTranscriptionRef.current.stop();
+    if (recordingStartingRef.current) { cancelAudio(); return; }
+    const session = recordingSessionRef.current;
+    if (realtimeTranslationTimerRef.current) clearTimeout(realtimeTranslationTimerRef.current);
+    const realtime = realtimeTranscriptionRef.current;
+    if (realtime) {
       realtimeTranscriptionRef.current = null;
-
-      // Clear interim transcript
-      setInterimTranscript('');
-
-      // Translate accumulated text if not already translating
-      const textToTranslate = (finalTranscript || sourceText).trim();
-      if (textToTranslate && !isTranslating) {
-        setSourceText(textToTranslate);
-        runCurrentText(textToTranslate);
+      setIsRecording(false); setIsTranscribing(true);
+      try {
+        const transcript = await realtime.stop();
+        if (session !== recordingSessionRef.current) return;
+        if (realtimeTranslationTimerRef.current) clearTimeout(realtimeTranslationTimerRef.current);
+        setInterimTranscript(''); setSourceText(transcript);
+        if (transcript.trim()) runCurrentText(transcript.trim());
+      } catch (error) {
+        if (session === recordingSessionRef.current) setError(error instanceof Error ? error.message : 'Could not finish voice input.');
+      } finally {
+        if (session === recordingSessionRef.current) setIsTranscribing(false);
       }
       return;
     }
-
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
-    }
-
+    if (mediaRecorderRef.current?.state === 'recording') mediaRecorderRef.current.stop();
     if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch (err) {
-        console.error('Failed to stop recognition:', err);
-      }
-    }
-
-    // Translate after stopping (only for Web Speech API; other providers translate after transcription finishes)
-    if (speechProvider === 'web-speech' && sourceText) {
-      runCurrentText(sourceText);
+      try { recognitionRef.current.stop(); }
+      catch { cancelAudio(); }
     }
   };
 
@@ -822,6 +815,9 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
     try {
       setIsProcessingImage(true);
       setError(null);
+      setSourceText('');
+      setTargetText('');
+      setTranslatedImage(null);
       setImage(base64Image);
 
       // VLM Mode: Direct translation without OCR (with streaming)
@@ -831,7 +827,7 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
         // Check if VLM is configured
         if (!isVLMConfigured()) {
           setIsProcessingImage(false);
-          setImage(null);
+          setError('Configure Vision translation in Image settings, or choose OCR text.');
           imageAbortControllerRef.current = null;
           toast({
             variant: "destructive",
@@ -868,7 +864,7 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
           console.log('[Image VLM] VLM translation completed');
         } catch (err) {
           // Don't show error if request was cancelled
-          if (err instanceof Error && err.name === 'AbortError') {
+          if (abortController.signal.aborted || (err instanceof Error && err.name === 'AbortError')) {
             console.log('[Image VLM] Request was cancelled');
             return;
           }
@@ -1252,10 +1248,15 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
             imageAbortControllerRef.current = null;
           }
           console.log('[Image Processing] Complete!');
+        } else {
+          setError('Could not create the image overlay. Try Vision translation.');
+          setIsProcessingImage(false);
+          imageAbortControllerRef.current = null;
         }
       };
       img.onerror = (err) => {
         console.error('[Canvas] Failed to load image:', err);
+        if (abortController.signal.aborted) return;
         setError('Failed to load image for processing');
         // Only clear loading state if this is still the active request
         if (imageAbortControllerRef.current === abortController) {
@@ -1266,13 +1267,13 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
       img.src = base64Image;
     } catch (err) {
       // Don't show error if request was cancelled
-      if (err instanceof Error && err.name === 'AbortError') {
+      if (abortController.signal.aborted || (err instanceof Error && err.name === 'AbortError')) {
         console.log('[Image Processing] Request was cancelled');
         return;
       }
       console.error('[Image Processing] Error:', err);
       setError(err instanceof Error ? err.message : 'OCR failed');
-      setImage(null);
+      // Keep the selected image so the user can retry.
       // Only clear loading state if this is still the active request
       if (imageAbortControllerRef.current === abortController) {
         setIsProcessingImage(false);
@@ -1293,9 +1294,11 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
     onDrop: async acceptedFiles => {
       if (acceptedFiles.length === 0) return;
       const file = acceptedFiles[0];
+      const selection = ++imageSelectionRef.current;
 
       try {
         const base64Image = await imageToBase64(file);
+        if (selection !== imageSelectionRef.current) return;
         await processImage(base64Image);
       } catch (err) {
         console.error('Image processing error:', err);
@@ -1308,12 +1311,7 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
     maxFiles: 1,
   });
   const selectWorkspaceMode = (mode: 'translation' | 'explanation' | 'qa') => {
-    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
-    translationAbortControllerRef.current?.abort();
-    explanationAbortControllerRef.current?.abort();
-    qaAbortControllerRef.current?.abort();
-    imageAbortControllerRef.current?.abort();
-    setIsTranslating(false); setIsProcessingImage(false); setError(null);
+    cancelWorkspaceRequest();
     setTargetText(''); setTranslatedImage(null);
     handleInputMethodChange(mode === 'qa' ? 'qa' : 'text');
     setTextMode(mode === 'explanation' ? 'explanation' : 'translation');
@@ -1324,7 +1322,7 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
     else if (textMode === 'explanation') void handleWordExplanation(sourceText, sourceLang, targetLang);
     else void handleTranslate(sourceText, sourceLang, targetLang);
   };
-  const busy = isTranslating || isProcessingImage;
+  const busy = isTranslating || isProcessingImage || isTranscribing;
   const assistantMode = inputMethod === 'qa' || (inputMethod === 'text' && textMode === 'explanation');
   const resultTitle = inputMethod === 'qa' ? 'Answer' : textMode === 'explanation' ? 'Explanation' : 'Translation';
   return <main className="tabitomo-workspace" aria-label="Translation workspace">
@@ -1340,17 +1338,17 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
     <div className="workspace-languages">
       {/* For explanation and Q/A: Only show target language */}
       {!assistantMode && <>
-        <Select value={sourceLang} onValueChange={(value) => setSourceLang(value as LanguageCode)}><SelectTrigger aria-label="Source language"><SelectValue /></SelectTrigger><SelectContent>{languageOptions.map((lang) => <SelectItem key={lang.value} value={lang.value}>{lang.label}</SelectItem>)}</SelectContent></Select>
-        <button id="swap-button" aria-label="Swap languages" title="Swap languages" className="workspace-icon" onClick={handleSwapLanguages}><ArrowLeftRight size={18} /></button>
+        <Select value={sourceLang} disabled={isRecording} onValueChange={(value) => changeLanguage('source', value as LanguageCode)}><SelectTrigger aria-label="Source language"><SelectValue /></SelectTrigger><SelectContent>{languageOptions.map((lang) => <SelectItem key={lang.value} value={lang.value}>{lang.label}</SelectItem>)}</SelectContent></Select>
+        <button id="swap-button" aria-label="Swap languages" title="Swap languages" className="workspace-icon" disabled={isRecording} onClick={handleSwapLanguages}><ArrowLeftRight size={18} /></button>
       </>}
       {assistantMode && <span className="workspace-language-label">Target Language</span>}
-      <Select value={targetLang} onValueChange={(value) => setTargetLang(value as LanguageCode)}><SelectTrigger aria-label="Target language"><SelectValue /></SelectTrigger><SelectContent>{languageOptions.map((lang) => <SelectItem key={lang.value} value={lang.value}>{lang.label}</SelectItem>)}</SelectContent></Select>
+      <Select value={targetLang} disabled={isRecording} onValueChange={(value) => changeLanguage('target', value as LanguageCode)}><SelectTrigger aria-label="Target language"><SelectValue /></SelectTrigger><SelectContent>{languageOptions.map((lang) => <SelectItem key={lang.value} value={lang.value}>{lang.label}</SelectItem>)}</SelectContent></Select>
     </div>
     <div className="workspace-content">
       <section className="workspace-source" aria-label="Source">
-        <div className="workspace-panel-heading"><h2>{inputMethod === 'image' ? 'Photo' : inputMethod === 'qa' ? 'Your question' : 'Source'}</h2>{(sourceText || image) && <button className="workspace-clear" aria-label="Clear" title="Clear" disabled={isRecording} onClick={() => { if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current); translationAbortControllerRef.current?.abort(); explanationAbortControllerRef.current?.abort(); qaAbortControllerRef.current?.abort(); imageAbortControllerRef.current?.abort(); setSourceText(''); setTargetText(''); setImage(null); setTranslatedImage(null); setIsTranslating(false); setIsProcessingImage(false); setError(null); }}>Clear</button>}</div>
+        <div className="workspace-panel-heading"><h2>{inputMethod === 'image' ? 'Photo' : inputMethod === 'qa' ? 'Your question' : 'Source'}</h2>{(sourceText || image) && <button className="workspace-clear" aria-label="Clear" title="Clear" disabled={isRecording} onClick={() => { cancelAudio(); cancelWorkspaceRequest(); setSourceText(''); setTargetText(''); setImage(null); setTranslatedImage(null); setIsTranslating(false); setIsProcessingImage(false); setError(null); }}>Clear</button>}</div>
         {inputMethod === 'image' ? <div className="workspace-photo">
-          {image ? <><img src={image} alt="Original" /><button className="workspace-icon photo-remove" aria-label="Remove image" onClick={() => { imageAbortControllerRef.current?.abort(); setIsProcessingImage(false); setImage(null); setTranslatedImage(null); setTargetText(''); }}><X size={17} /></button></> : <div {...getRootProps()} className="workspace-dropzone"><input {...getInputProps()} /><ImageIcon size={30} /><strong>Bring a photo, find the words.</strong><span>Drop an image or tap to choose</span><button className="workspace-secondary" onClick={(e) => { e.stopPropagation(); setIsCameraOpen(true); }}><Camera size={16} />Open camera</button></div>}
+          {image ? <><img src={image} alt="Original" /><button className="workspace-icon photo-remove" aria-label="Remove image" onClick={() => { cancelWorkspaceRequest(); setImage(null); setSourceText(''); setTranslatedImage(null); setTargetText(''); }}><X size={17} /></button></> : <div {...getRootProps()} className="workspace-dropzone"><input {...getInputProps()} /><ImageIcon size={30} /><strong>Bring a photo, find the words.</strong><span>Drop an image or tap to choose</span><button className="workspace-secondary" onClick={(e) => { e.stopPropagation(); setIsCameraOpen(true); }}><Camera size={16} />Open camera</button></div>}
         </div> : <textarea ref={textareaRef} aria-label="Source text" value={sourceText + (interimTranscript && isRecording ? (sourceText ? ' ' : '') + interimTranscript : '')} onChange={handleTextChange} placeholder={isRecording ? 'Listening…' : inputMethod === 'qa' ? 'How do I ask for the check?' : textMode === 'explanation' ? 'A word, a phrase, something new…' : `What would you like to say in ${SUPPORTED_LANGUAGES[sourceLang]}?`} readOnly={isRecording} className="workspace-textarea custom-scrollbar" onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); runText(); } }} />}
         <div className="workspace-source-toolbar">
           <div className="workspace-toolbar-group">
@@ -1365,13 +1363,13 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
       <section className="workspace-result" aria-label={resultTitle} aria-busy={busy}>
         <div className="workspace-panel-heading"><h2>{resultTitle}</h2><span>{SUPPORTED_LANGUAGES[targetLang]}</span></div>
         <div className="workspace-result-body custom-scrollbar" ref={targetInputRef}>
-          {busy && !targetText ? <div role="status" className="workspace-empty"><Loader2 size={26} className="animate-spin" /><strong>{isProcessingImage ? 'Reading your photo…' : 'Finding the right words…'}</strong></div>
+          {busy && !targetText ? <div role="status" className="workspace-empty"><Loader2 size={26} className="animate-spin" /><strong>{isProcessingImage ? 'Reading your photo…' : isTranscribing ? 'Transcribing…' : 'Finding the right words…'}</strong></div>
           : error ? <div role="alert" className="workspace-empty workspace-error"><p>{error}</p><button className="workspace-secondary" onClick={() => onOpenSettings(inputMethod === 'image' ? 'image' : 'general')}>Open Settings</button></div>
           : translatedImage && !useVLMMode ? <img src={translatedImage} alt="Translated" className="workspace-translated-image" onClick={() => setIsLightboxOpen(true)} />
-          : targetText ? <>{isThinking && <p className="workspace-thinking" role="status">Thinking…</p>}{useVLMMode || assistantMode ? <div className="prose dark:prose-invert prose-sm max-w-none"><ReactMarkdown remarkPlugins={[remarkGfm]}>{targetText}</ReactMarkdown></div> : furiganaHtml ? <div className="whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: furiganaHtml }} /> : <p className="whitespace-pre-wrap">{targetText}</p>}</>
+          : targetText ? <>{busy && <p className="workspace-thinking" role="status">{isThinking ? 'Thinking…' : 'Translating…'}</p>}{!busy && isThinking && <p className="workspace-thinking" role="status">Thinking…</p>}{(inputMethod === 'image' && useVLMMode) || assistantMode ? <div className="prose dark:prose-invert prose-sm max-w-none"><ReactMarkdown remarkPlugins={[remarkGfm]}>{targetText}</ReactMarkdown></div> : furiganaHtml?.text === targetText ? <div className="whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: furiganaHtml.html }} /> : <p className="whitespace-pre-wrap">{targetText}</p>}</>
           : <div className="workspace-empty"><p>{inputMethod === 'qa' ? 'Ask a question and get a quick answer' : textMode === 'explanation' ? 'Enter text to see its explanation' : 'Translation will appear here'}</p>{!isGeneralAIConfigured() && !(hasProviderConnection(settings)) && <button className="workspace-secondary" onClick={() => onOpenSettings('general')}>Connect your AI</button>}</div>}
         </div>
-        <div className="workspace-result-toolbar"><span role="status">{copied ? 'Copied to clipboard' : ''}</span><div className="workspace-toolbar-group"><button className="workspace-icon" disabled={!targetText} aria-label="Play audio" title="Play audio" onClick={() => speakText(targetText, targetLang)}><Volume2 size={18} /></button><button className="workspace-icon" disabled={!targetText} aria-label="Copy to clipboard" title="Copy to clipboard" onClick={copyToClipboard}>{copied ? <Check size={18} /> : <Copy size={18} />}</button></div></div>
+        <div className="workspace-result-toolbar"><span role="status">{copied ? 'Copied to clipboard' : ''}</span><div className="workspace-toolbar-group"><button className="workspace-icon" disabled={!targetText} aria-label={isSpeaking ? 'Stop audio' : 'Play audio'} title={isSpeaking ? 'Stop audio' : 'Play audio'} aria-pressed={isSpeaking} onClick={toggleSpeech}><Volume2 size={18} /></button><button className="workspace-icon" disabled={!targetText} aria-label="Copy to clipboard" title="Copy to clipboard" onClick={copyToClipboard}>{copied ? <Check size={18} /> : <Copy size={18} />}</button></div></div>
       </section>
     </div>
     <Suspense fallback={null}><CameraPanel isOpen={isCameraOpen} onClose={() => setIsCameraOpen(false)} onCapture={handleCameraCapture} /></Suspense>

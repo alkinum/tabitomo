@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { readTranslationText } from './result-text';
 
 test.use({ serviceWorkers: 'block' });
 const catalogURL = 'https://openrouter.ai/api/v1/models';
@@ -48,7 +49,7 @@ for (const width of [320, 390]) for (const colorScheme of ['light', 'dark'] as c
       return route.fulfill({ headers: cors, json: { choices: [{ message: { content: 'こんにちは（友達）' } }] } });
     });
     await page.getByLabel('Source text').fill('你好');
-    await expect(page.getByRole('region', { name: 'Translation', exact: true })).toContainText('こんにちは（友達）');
+    await expect.poll(() => readTranslationText(page)).toContain('こんにちは（友達）');
     expect(calls).toBeGreaterThan(0);
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
     await page.getByRole('tab', { name: 'Translate', exact: true }).click();

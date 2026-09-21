@@ -13,7 +13,26 @@ export default defineConfig(({ mode }) => ({
     UnoCSS(),
     {
       name: 'kuromoji-browser-loader',
+      enforce: 'pre',
       transform(code, id) {
+        // zlibjs publishes a Closure script whose top-level `this` is its CJS
+        // export object. Preserve that object when Rolldown converts it to ESM.
+        if (id.includes('/zlibjs/bin/gunzip.min.js')) {
+          return { code: code.replace('}).call(this);', '}).call(exports);'), map: null };
+        }
+        if (id.includes('kuromoji') && id.endsWith('/loader/BrowserDictionaryLoader.js')) {
+          // Some hosts send .gz as Content-Encoding:gzip, so XHR has already
+          // decompressed it. Accept both representations and settle failures.
+          return {
+            code: code.replace(/var gz = new zlib\.Zlib\.Gunzip\(new Uint8Array\(arraybuffer\)\);\s*var typed_array = gz\.decompress\(\);\s*callback\(null, typed_array\.buffer\);/, `try {
+              var bytes = new Uint8Array(arraybuffer);
+              var data = bytes[0] === 31 && bytes[1] === 139
+                ? new zlib.Zlib.Gunzip(bytes).decompress() : bytes;
+              callback(null, data.buffer);
+            } catch (error) { callback(error, null); }`),
+            map: null,
+          };
+        }
         // Replace NodeDictionaryLoader with BrowserDictionaryLoader for kuromoji
         if (id.includes('kuromoji') && id.includes('TokenizerBuilder')) {
           return {

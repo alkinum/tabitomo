@@ -1,5 +1,9 @@
 # tabitomo Expo Universal App Requirements
 
+## 2026-09-21 Overall review
+
+Web request cancellation, model-cache invalidation, photo retry, voice sessions, playback/copy feedback and first-run QR/save recovery now match the existing mobile behavior contract. Production Japanese dictionary loading and HTML-safe ruby output are verified with real compressed and decoded dictionary assets. Native maximum Dynamic Type now scrolls workspace navigation and keeps the primary action reachable, with bounded branding and navigation-title scaling. Shared settings, encryption and native sync contracts are unchanged. See [review and evidence](overall-review-2026-09-21.md) for the platform impact and current verification limits.
+
 ## 2026-09-20 Safe Area correction
 
 Native workspace, sheets and lightbox now own explicit inset padding per host. A local Expo UIKit geometry module converts view frames into screen coordinates for sheet keyboard avoidance and simulator assertions; native Podfile.lock is synchronized. Web uses CSS safe-area env for the canvas, fixed dialogs and camera/notification controls. This is a platform layout exception with equivalent protected controls, with no shared settings/provider/storage change. Earlier screenshots did not establish correct status-bar avoidance; see [current implementation and evidence](safe-area-review-2026-09-20.md).

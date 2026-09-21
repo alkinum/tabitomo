@@ -2,7 +2,6 @@ import { access, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const rootDir = path.resolve(new URL('..', import.meta.url).pathname);
-const mobileDir = path.join(rootDir, 'apps/mobile');
 
 const expected = {
   appName: 'tabitomo',

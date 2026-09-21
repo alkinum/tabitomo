@@ -344,7 +344,7 @@ async function installPreparedModelPack({
   const pack = selectModelPack(manifest, packId);
   if (allowedAssetOrigin) {
     for (const file of pack.files) {
-      let origin = '';
+      let origin: string;
       try {
         origin = new URL(file.url).origin;
       } catch {
@@ -377,7 +377,7 @@ async function installPreparedModelPack({
 
   let activatedNewPack = false;
   let movedPreviousPack = false;
-  let installedPack: InstalledModelPack | null = null;
+  let installedPack: InstalledModelPack;
 
   try {
     for (const file of pack.files) {

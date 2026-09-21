@@ -265,7 +265,7 @@ const startTinyModelPackServer = async () => {
 
     if (requestUrl.pathname === '/v1/chat/completions') {
       const bodyText = await readBody(request);
-      let body = {};
+      let body;
       try {
         body = JSON.parse(bodyText || '{}');
       } catch {

@@ -92,6 +92,7 @@ export class RealtimeTranscriptionService {
       this.isRunning = true;
       console.log('Realtime transcription started');
     } catch (error) {
+      await this.stop();
       console.error('Failed to start realtime transcription:', error);
       if (this.config.onError) {
         this.config.onError(error as Error);
@@ -104,10 +105,6 @@ export class RealtimeTranscriptionService {
    * Stop realtime transcription
    */
   async stop(): Promise<string> {
-    if (!this.isRunning) {
-      return this.getFinalTranscript();
-    }
-
     if (this.localRealtimeActive) {
       await localAsrService.stopRealtime();
       this.localRealtimeActive = false;

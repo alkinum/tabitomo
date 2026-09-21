@@ -3,7 +3,7 @@ import { clearTranslationOverride } from '../../packages/tabitomo-core/src/provi
 import { OCRSettings } from './OCRSettings';
 import { hasProviderConnection } from '../utils/config/settings';
 import { AIConnection } from './AIConnection';
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Settings as SettingsIcon, X, Upload, Scan, Eye, EyeOff, Mic, Image as ImageIcon, CheckCircle } from 'lucide-react';
 import { AISettings, DEFAULT_SETTINGS, normalizeSettings, type LocalAsrEngine, type LocalVadMode } from '../utils/config/settings';
 import { importConfigFromFile, importConfigFromQRCode } from '../utils/config/export';
@@ -38,6 +38,17 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onComplete
   const fileInputRef = useRef<HTMLInputElement>(null);
   const qrScannerRef = useRef<Html5Qrcode | null>(null);
   const [isScanning, setIsScanning] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const scannerGeneration = useRef(0);
+  useEffect(() => {
+    setIsScanning(false);
+    return () => {
+      scannerGeneration.current += 1;
+      const scanner = qrScannerRef.current;
+      qrScannerRef.current = null;
+      if (scanner?.isScanning) void scanner.stop().catch(() => {});
+    };
+  }, [isOpen, setupMode, importMode]);
 
   const backdropCloseHandlers = useBackdropClose<HTMLDivElement>({ onClose: onSkip });
 
@@ -62,7 +73,9 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onComplete
 
   const handleImageComplete = () => {
     const finalSettings = normalizeSettings(configMode === 'general' ? clearTranslationOverride(settings) : settings);
-    onComplete(finalSettings);
+    setSaveError(null);
+    try { onComplete(finalSettings); }
+    catch (error) { setSaveError(error instanceof Error ? error.message : 'Could not save settings. Try again.'); }
   };
 
   const handleSetLater = () => {
@@ -81,10 +94,12 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onComplete
       return;
     }
 
+    const generation = scannerGeneration.current;
     setIsProcessing(true);
     setImportError(null);
     try {
       const imported = await importConfigFromFile(file, password);
+      if (generation !== scannerGeneration.current) return;
       onComplete(imported);
       setImportSuccess('Settings imported successfully!');
       setTimeout(() => {
@@ -108,6 +123,7 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onComplete
       return;
     }
 
+    const generation = ++scannerGeneration.current;
     setIsScanning(true);
     setImportError(null);
 
@@ -119,8 +135,11 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onComplete
         { facingMode: 'environment' },
         { fps: 10, qrbox: { width: 250, height: 250 } },
         async (decodedText) => {
+          if (generation !== scannerGeneration.current) return;
           try {
             const imported = await importConfigFromQRCode(decodedText, password);
+            if (generation !== scannerGeneration.current) return;
+            scannerGeneration.current += 1;
             await scanner.stop();
             qrScannerRef.current = null;
             setIsScanning(false);
@@ -142,13 +161,16 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onComplete
           // Ignore scan errors (no QR code detected)
         }
       );
+      if (generation !== scannerGeneration.current && scanner.isScanning) await scanner.stop();
     } catch (err) {
+      if (generation !== scannerGeneration.current) return;
       setImportError(`Scanner failed: ${err instanceof Error ? err.message : 'Camera access denied'}`);
       setIsScanning(false);
     }
   };
 
   const stopQRScanner = async () => {
+    scannerGeneration.current += 1;
     if (qrScannerRef.current) {
       try {
         await qrScannerRef.current.stop();
@@ -190,6 +212,7 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onComplete
           </button>
         </div>
 
+        {saveError && <p role="alert" className="px-6 pt-3 text-sm text-red-600 dark:text-red-400">{saveError}</p>}
         {/* Content */}
         <div className="p-6 pt-4 max-h-[60vh] overflow-y-overlay custom-scrollbar">
           {currentStep === 'choice' && setupMode === 'manual' && (
@@ -262,18 +285,18 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onComplete
                   <AIConnection value={settings.generalAI} onChange={(generalAI) => setSettings({ ...settings, generalAI })}>
 
                     <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">API Endpoint</label>
-                      <input type="text" value={settings.generalAI.endpoint} onChange={(e) => setSettings({ ...settings, generalAI: { ...settings.generalAI, endpoint: e.target.value } })} placeholder="https://api.openai.com/v1" className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors" />
+                      <label htmlFor="setup-endpoint" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Endpoint</label>
+                      <input id="setup-endpoint" type="text" value={settings.generalAI.endpoint} onChange={(e) => setSettings({ ...settings, generalAI: { ...settings.generalAI, endpoint: e.target.value } })} placeholder="https://api.openai.com/v1" className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors" />
                     </div>
 
                     <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">API Key</label>
-                      <input type="password" value={settings.generalAI.apiKey} onChange={(e) => setSettings({ ...settings, generalAI: { ...settings.generalAI, apiKey: e.target.value } })} placeholder="sk-..." className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors" />
+                      <label htmlFor="setup-api-key" className="block text-sm font-medium text-gray-700 dark:text-gray-300">API key</label>
+                      <input id="setup-api-key" type="password" value={settings.generalAI.apiKey} onChange={(e) => setSettings({ ...settings, generalAI: { ...settings.generalAI, apiKey: e.target.value } })} placeholder="sk-..." className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors" />
                     </div>
 
                     <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Model Name</label>
-                      <input type="text" value={settings.generalAI.modelName} onChange={(e) => setSettings({ ...settings, generalAI: { ...settings.generalAI, modelName: e.target.value } })} placeholder="Model ID" className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors" />
+                      <label htmlFor="setup-model" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Model</label>
+                      <input id="setup-model" type="text" value={settings.generalAI.modelName} onChange={(e) => setSettings({ ...settings, generalAI: { ...settings.generalAI, modelName: e.target.value } })} placeholder="Model ID" className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors" />
                     </div>
                   </AIConnection>
                 </div>
@@ -341,9 +364,9 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onComplete
                         <p className="text-xs text-gray-500 dark:text-gray-400">OpenAI-compatible audio/transcriptions API, including local servers.</p>
                       </div>
                     <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Model Name</label>
+                      <label htmlFor="setup-speech-model" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Model</label>
                       <input
-                        type="text"
+                        id="setup-speech-model" type="text"
                         value={settings.speechRecognition.modelName || ''}
                         onChange={(e) =>
                           setSettings({
@@ -356,9 +379,9 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onComplete
                       />
                     </div>
                     <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">API Key</label>
+                      <label htmlFor="setup-speech-key" className="block text-sm font-medium text-gray-700 dark:text-gray-300">API key</label>
                       <input
-                        type="password"
+                        id="setup-speech-key" type="password"
                         value={settings.speechRecognition.apiKey || ''}
                         onChange={(e) =>
                           setSettings({
@@ -682,7 +705,7 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onComplete
                 </div>
               ) : (
                 <div className="space-y-4">
-                  <button onClick={() => setImportMode(null)} className="text-sm text-indigo-600 dark:text-indigo-400 hover:underline">
+                  <button onClick={() => { void stopQRScanner(); setImportMode(null); }} className="text-sm text-indigo-600 dark:text-indigo-400 hover:underline">
                     ← Back to import options
                   </button>
 
@@ -710,6 +733,7 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onComplete
                     </>
                   )}
 
+                  {importMode === 'import-qr' && <div id="qr-reader-wizard" className="overflow-hidden rounded-xl" />}
                   {/* Import QR */}
                   {importMode === 'import-qr' && (
                     <>

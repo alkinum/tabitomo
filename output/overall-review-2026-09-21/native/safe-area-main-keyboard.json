@@ -1,0 +1,34 @@
+{
+  "scene": "main-keyboard",
+  "name": "workspace",
+  "insets": {
+    "left": 0,
+    "top": 59,
+    "right": 0,
+    "bottom": 34
+  },
+  "outer": {
+    "height": 523,
+    "y": 0,
+    "x": 0,
+    "width": 393
+  },
+  "inner": {
+    "x": 0,
+    "width": 393,
+    "height": 456,
+    "y": 67
+  },
+  "keyboardVisible": true,
+  "keyboardTop": 523,
+  "checks": {
+    "top": true,
+    "left": true,
+    "right": true,
+    "bottom": true,
+    "keyboard": true,
+    "nativeInsets": true,
+    "nativeScreenCoordinates": true
+  },
+  "passed": true
+}

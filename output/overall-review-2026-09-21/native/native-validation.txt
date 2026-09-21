@@ -1,0 +1,38 @@
+tabitomo-review-ios-full.log
+Safe Area passed: first-screen-light; top=59, bottom=34, contentY=67.
+Safe Area passed: first-screen-dark; top=59, bottom=34, contentY=67.
+Safe Area passed: main; top=59, bottom=34, contentY=67.
+Safe Area passed: main-keyboard; top=59, bottom=34, contentY=67.
+Safe Area passed: safe-area-return; top=59, bottom=34, contentY=67.
+Safe Area passed: settings-keyboard; top=0, bottom=34, contentY=59.
+Safe Area passed: config-guidance; top=59, bottom=34, contentY=67.
+Safe Area passed: image-lightbox; top=59, bottom=34, contentY=59.
+Safe Area passed: language-picker; top=0, bottom=34, contentY=59.
+Safe Area passed: qr-scanner; top=0, bottom=34, contentY=59.
+Safe Area passed: device-qa; top=0, bottom=34, contentY=59.
+Safe Area passed: settings; top=0, bottom=34, contentY=59.
+QR import smoke passed: payloadLength=1832.
+Config round-trip smoke passed: payloadLength=1800.
+Safe Area passed: settings-hymt2; top=0, bottom=34, contentY=59.
+Text-provider smoke passed: requests=3.
+Image-provider smoke passed: requests=3.
+Speech-provider smoke passed: requests=1.
+
+tabitomo-review-ios-complete.log
+Safe Area passed: first-screen-light; top=59, bottom=34, contentY=67.
+Safe Area passed: first-screen-dark; top=59, bottom=34, contentY=67.
+Safe Area passed: main; top=59, bottom=34, contentY=67.
+Safe Area passed: main-keyboard; top=59, bottom=34, contentY=67.
+Safe Area passed: settings-keyboard; top=0, bottom=34, contentY=59.
+Safe Area passed: settings-hymt2; top=0, bottom=34, contentY=59.
+Local-model runtime smoke passed: {"whisper":{"modelId":"whisper-base","runtime":"sherpa-onnx-ios","durationMs":251,"transcriptLength":7},"senseVoice":{"modelId":"sensevoice-small","runtime":"sherpa-onnx-ios","durationMs":80,"transcriptLength":5},"ppocr":{"modelId":"ppocr-v6-small","runtime":"onnxruntime-mobile","durationMs":97,"lines":1}}.
+Model-pack install smoke passed: smoke-server-fallback-tiny@2026.07.smoke, bytes=31.
+Safe Area passed: setup-manual; top=0, bottom=34, contentY=59.
+iOS simulator smoke passed. Screenshot sizes: light=223408 bytes, dark=211364 bytes, scenes=11.
+
+Largest Dynamic Type final keyboard run
+Safe Area passed: first-screen-light; top=59, bottom=34, contentY=67.
+Safe Area passed: first-screen-dark; top=59, bottom=34, contentY=67.
+Safe Area passed: main; top=59, bottom=34, contentY=67.
+Safe Area passed: main-keyboard; top=59, bottom=34, contentY=67.
+iOS simulator smoke passed. Screenshot sizes: light=276373 bytes, dark=259409 bytes, scenes=2.

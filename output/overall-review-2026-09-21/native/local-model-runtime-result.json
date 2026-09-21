@@ -1,0 +1,30 @@
+{
+  "passed": true,
+  "status": "passed",
+  "models": {
+    "whisper": {
+      "modelId": "whisper-base",
+      "runtime": "sherpa-onnx-ios",
+      "durationMs": 251,
+      "transcriptLength": 7
+    },
+    "senseVoice": {
+      "modelId": "sensevoice-small",
+      "runtime": "sherpa-onnx-ios",
+      "durationMs": 80,
+      "transcriptLength": 5
+    },
+    "ppocr": {
+      "modelId": "ppocr-v6-small",
+      "runtime": "onnxruntime-mobile",
+      "durationMs": 97,
+      "lines": 1
+    }
+  },
+  "privacy": {
+    "mediaOmitted": true,
+    "recognizedTextOmitted": true,
+    "localFileUrisOmitted": true
+  },
+  "writtenAt": "2026-09-21T07:34:57.443Z"
+}

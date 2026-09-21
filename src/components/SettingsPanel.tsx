@@ -179,7 +179,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
                   {/* API Endpoint */}
                   <div className="space-y-1.5">
                     <label htmlFor="generalEndpoint" className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
-                      API Endpoint
+                      Endpoint
                     </label>
                     <input
                       id="generalEndpoint"
@@ -194,7 +194,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
                   {/* API Key */}
                   <div className="space-y-1.5">
                     <label htmlFor="generalApiKey" className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
-                      API Key
+                      API key
                     </label>
                     <input
                       id="generalApiKey"
@@ -209,7 +209,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
                   {/* Model Name */}
                   <div className="space-y-1.5">
                     <label htmlFor="generalModel" className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
-                      Model Name
+                      Model
                     </label>
                     <input
                       id="generalModel"
@@ -296,7 +296,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
                       </div>
                       <div className="space-y-1.5">
                         <label htmlFor="speechModelName" className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
-                          Model Name
+                          Model
                         </label>
                         <input
                           id="speechModelName"
@@ -315,7 +315,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
                       </div>
                       <div className="space-y-1.5">
                       <label htmlFor="speechApiKey" className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
-                        API Key
+                        API key
                       </label>
                       <input
                         id="speechApiKey"

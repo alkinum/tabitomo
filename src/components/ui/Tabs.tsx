@@ -7,7 +7,7 @@ interface TabsProps {
   className?: string;
   onValueChange?: (value: string) => void;
 }
-const TabsContext = createContext({ value: '', id: '', onValueChange: (_value: string) => {} });
+const TabsContext = createContext<{ value: string; id: string; onValueChange: (value: string) => void }>({ value: '', id: '', onValueChange: () => {} });
 
 export function Tabs({ defaultValue, value: controlledValue, children, className, onValueChange }: TabsProps) {
   const id = useId();

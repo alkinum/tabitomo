@@ -1,13 +1,13 @@
 import { getTranslationConnection, updateTranslationConnection, hasTranslationOverride } from '@tabitomo/core';
 import { SETTINGS_SECTIONS, type SettingsSectionId } from '@tabitomo/core';
 import { lightTheme, darkTheme, type AppTheme } from '@tabitomo/core';
-import { OCR_HELP, LOCAL_MODEL_GUIDANCE, OCR_MODE_OPTIONS, getOCRMode, selectOCRMode, supportsOCROverlay } from '@tabitomo/core';
+import { OCR_HELP, OCR_MODE_OPTIONS, getOCRMode, selectOCRMode, supportsOCROverlay } from '@tabitomo/core';
 import { hasProviderConnection } from '@tabitomo/core';
 import { AIConnection } from './src/AIConnection';
 import { createControlStyles } from './src/controlStyles';
 import { NativeMaterial, NativePreferencesProvider, useNativePreferences, selectionFeedback, actionFeedback } from './src/NativeChrome';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -159,7 +159,6 @@ import {
   setMobileSettingsSyncEnabled,
 } from './src/storage';
 import {
-  OFFLINE_MODEL_DEFINITIONS,
   deleteInstalledModelPackFiles,
   ensureModelPackRootDirectory,
   getModelPackRootUri,
@@ -1119,6 +1118,8 @@ function AppContent() {
   const recorderState = useAudioRecorderState(recorder);
   const isVoiceRecording = recorderState.isRecording || nativeSpeechActive;
   const sourceInputRef = useRef<TextInput>(null);
+  const workspaceScrollRef = useRef<ScrollView>(null);
+  const sourceLayoutRef = useRef({ sheetY: 0, inputY: 0 });
   const textActionAbortRef = useRef<AbortController | null>(null);
   const imageActionAbortRef = useRef<AbortController | null>(null);
   const textAutoRunTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1162,6 +1163,16 @@ function AppContent() {
     const timer = setTimeout(() => sourceInputRef.current?.focus(), 450);
     return () => clearTimeout(timer);
   }, [smokeScene]);
+
+  useEffect(() => {
+    if (!usesLargeText || !sourceInputFocused || !keyboardVisible) return;
+    // Wait for the keyboard and hidden mode bar to finish changing the viewport.
+    const timer = setTimeout(() => {
+      const { sheetY, inputY } = sourceLayoutRef.current;
+      workspaceScrollRef.current?.scrollTo({ y: Math.max(0, sheetY + inputY - 12), animated: true });
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [keyboardVisible, sourceInputFocused, usesLargeText]);
 
   useEffect(() => {
     if (smokeScene !== 'safe-area-return') return;
@@ -2713,6 +2724,8 @@ function AppContent() {
     }
   }, []);
 
+  const runAutoTextMode = useEffectEvent(handleRunTextMode);
+
   useEffect(() => {
     if (
       smokeScene
@@ -2761,7 +2774,7 @@ function AppContent() {
     textAutoRunTimerRef.current = setTimeout(() => {
       textAutoRunTimerRef.current = null;
       lastAutoTextRunKeyRef.current = actionKey;
-      void handleRunTextMode(trimmedText, textMode, { silent: true });
+      void runAutoTextMode(trimmedText, textMode, { silent: true });
     }, TEXT_AUTO_RUN_DELAY_MS);
 
     return () => {
@@ -3291,6 +3304,26 @@ function AppContent() {
 
   const usesTargetOnlyLanguageBar = textMode === 'explanation' || textMode === 'qa';
   const needsSetupAttention = !isTextTranslationConfigured(settings);
+  const workspaceNavigation = <>
+                {!keyboardVisible && <View pointerEvents={isVoiceRecording || busyState === 'transcribing' ? 'none' : 'auto'} accessibilityElementsHidden={isVoiceRecording}><TextModeSwitcher mode={textMode} onChange={handleSelectTextMode} /></View>}
+                <NativeMaterial theme={theme} style={[styles.languageBar, usesLargeText && styles.languageBarLargeText, usesTargetOnlyLanguageBar && styles.languageBarTargetOnly]}>
+                  {usesTargetOnlyLanguageBar ? (
+                    <View style={[styles.targetLanguageOnly, usesLargeText && styles.targetLanguageOnlyLargeText]}>
+                      <Text numberOfLines={usesLargeText ? undefined : 1} style={styles.languageBarLabel}>Target Language</Text>
+                      <View style={[styles.targetLanguageButtonRow, usesLargeText && styles.targetLanguageButtonRowLargeText]}>
+                        <LanguageButton disabled={isVoiceRecording || busyState === 'transcribing'} code={targetLang} align="right" onPress={() => setLanguagePickerTarget('target')} />
+                      </View>
+                    </View>
+                  ) : (
+                    <>
+                      <LanguageButton disabled={isVoiceRecording || busyState === 'transcribing'} code={sourceLang} onPress={() => setLanguagePickerTarget('source')} />
+                      <IconButton icon={ArrowLeftRight} label="Swap" onPress={handleSwapLanguages} disabled={isVoiceRecording || busyState === 'transcribing'} compact quiet />
+                      <LanguageButton disabled={isVoiceRecording || busyState === 'transcribing'} code={targetLang} onPress={() => setLanguagePickerTarget('target')} />
+                    </>
+                  )}
+                </NativeMaterial>
+
+  </>;
 
   return (
     <SafeAreaAuditContext.Provider value={smokeScene}>
@@ -3303,7 +3336,7 @@ function AppContent() {
               <View style={[styles.header, keyboardVisible && styles.headerEditing]}>
                 <View style={styles.brandRow}>
                   <Image source={BUDDY_IMAGE} style={[styles.brandIcon, keyboardVisible && styles.brandIconEditing]} />
-                  <Text style={[styles.brand, keyboardVisible && styles.brandEditing]}>tabitomo</Text>
+                  <Text numberOfLines={1} maxFontSizeMultiplier={1.3} style={[styles.brand, keyboardVisible && styles.brandEditing]}>tabitomo</Text>
                 </View>
                 <NativeMaterial theme={theme} style={styles.headerSettingsMaterial} interactive>
                 <Pressable
@@ -3323,34 +3356,20 @@ function AppContent() {
               </View>
 
               <View style={[styles.appBody, isCompactViewport && styles.appBodyCompact, { paddingBottom: keyboardVisible ? 8 : (isCompactViewport ? 10 : 12) }]}>
-                {!keyboardVisible && <View pointerEvents={isVoiceRecording || busyState === 'transcribing' ? 'none' : 'auto'} accessibilityElementsHidden={isVoiceRecording}><TextModeSwitcher mode={textMode} onChange={handleSelectTextMode} /></View>}
-                <NativeMaterial theme={theme} style={[styles.languageBar, usesTargetOnlyLanguageBar && styles.languageBarTargetOnly]}>
-                  {usesTargetOnlyLanguageBar ? (
-                    <View style={styles.targetLanguageOnly}>
-                      <Text numberOfLines={1} style={styles.languageBarLabel}>Target Language</Text>
-                      <View style={styles.targetLanguageButtonRow}>
-                        <LanguageButton disabled={isVoiceRecording || busyState === 'transcribing'} code={targetLang} align="right" onPress={() => setLanguagePickerTarget('target')} />
-                      </View>
-                    </View>
-                  ) : (
-                    <>
-                      <LanguageButton disabled={isVoiceRecording || busyState === 'transcribing'} code={sourceLang} onPress={() => setLanguagePickerTarget('source')} />
-                      <IconButton icon={ArrowLeftRight} label="Swap" onPress={handleSwapLanguages} disabled={isVoiceRecording || busyState === 'transcribing'} compact quiet />
-                      <LanguageButton disabled={isVoiceRecording || busyState === 'transcribing'} code={targetLang} onPress={() => setLanguagePickerTarget('target')} />
-                    </>
-                  )}
-                </NativeMaterial>
+                {!usesLargeText && workspaceNavigation}
 
                 <ScrollView
+                  ref={workspaceScrollRef}
                   style={[styles.workspace, { marginHorizontal: isCompactViewport ? -16 : -20 }]}
                   contentContainerStyle={[styles.workspaceContent, { paddingHorizontal: isCompactViewport ? 16 : 20 }]}
                   keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
                   keyboardShouldPersistTaps="handled"
-                  showsVerticalScrollIndicator={false}
+                  showsVerticalScrollIndicator={usesLargeText}
                 >
-                  <View style={styles.translationSheet}>
+                  {usesLargeText && workspaceNavigation}
+                  <View style={styles.translationSheet} onLayout={(event) => { sourceLayoutRef.current.sheetY = event.nativeEvent.layout.y; }}>
                   <View style={[styles.panel, isCompactViewport && styles.panelCompact, sourceInputFocused && styles.panelFocused]}>
-                    <View style={styles.panelHeader}>
+                    <View style={[styles.panelHeader, usesLargeText && styles.panelHeaderLargeText]}>
                       <View style={styles.panelTitleRow}>
                         <Text style={styles.panelTitle}>{imageUri ? 'Photo' : textMode === 'qa' ? 'Your question' : 'Source'}</Text>
                       </View>
@@ -3359,6 +3378,7 @@ function AppContent() {
                       </Pressable>
                     </View>
                     {!imageUri && <View
+                      onLayout={(event) => { sourceLayoutRef.current.inputY = event.nativeEvent.layout.y; }}
                       style={[
                         styles.sourceInputFrame,
                         isCompactViewport && styles.sourceInputFrameCompact,
@@ -3402,7 +3422,7 @@ function AppContent() {
                   )}
 
                   <View style={[styles.resultPanel, isNarrowViewport && styles.resultPanelNarrow]}>
-                    <View style={styles.panelHeader}>
+                    <View style={[styles.panelHeader, usesLargeText && styles.panelHeaderLargeText]}>
                       <View style={styles.panelTitleRow}>
                         <Text style={styles.panelTitle}>{textModeTitle(textMode)}</Text>
                       </View>
@@ -3445,9 +3465,10 @@ function AppContent() {
                     )}
                   </View>
                   </View>
+                  {usesLargeText && notice && <Text accessibilityLiveRegion="polite" style={styles.notice}>{notice}</Text>}
                 </ScrollView>
 
-                {notice && <Text accessibilityLiveRegion="polite" style={styles.notice}>{notice}</Text>}
+                {!usesLargeText && notice && <Text accessibilityLiveRegion="polite" style={styles.notice}>{notice}</Text>}
                 <NativeMaterial theme={theme} style={styles.inputDock}>
                       <View style={[styles.sourceToolbar, usesLargeText && styles.sourceToolbarLargeText]}>
                         <View style={[styles.sourceToolbarGroup, isCompactViewport && styles.sourceToolbarGroupCompact]}>
@@ -3658,6 +3679,7 @@ function ConfigGuidanceCard({
 
 function LanguageButton({ code, onPress, disabled = false, align = 'center' }: { code: LanguageCode; onPress: () => void; disabled?: boolean; align?: 'center' | 'right' }) {
   const { styles, theme } = useAppTheme();
+  const { fontScale } = useWindowDimensions();
   const label = `${SUPPORTED_LANGUAGES[code]} language`;
   return (
     <Pressable
@@ -3668,7 +3690,7 @@ function LanguageButton({ code, onPress, disabled = false, align = 'center' }: {
       style={({ pressed }) => [styles.languageButton, disabled && styles.disabled, align === 'right' && styles.languageButtonRight, pressed && styles.buttonPressed]}
       onPress={() => { selectionFeedback(); onPress(); }}
     >
-      <Text numberOfLines={1} style={styles.languageName}>{SUPPORTED_LANGUAGES[code]}</Text>
+      <Text numberOfLines={fontScale > 1.3 ? undefined : 1} style={styles.languageName}>{SUPPORTED_LANGUAGES[code]}</Text>
       <ChevronDown size={13} color={theme.subtleText} strokeWidth={1.8} />
     </Pressable>
   );
@@ -3707,13 +3729,19 @@ function TextModeSwitcher({ mode, onChange }: { mode: TextMode; onChange: (mode:
 }
 
 function PortableTextModeSwitcher({ mode, onChange }: { mode: TextMode; onChange: (mode: TextMode) => void }) {
-  const { styles, theme } = useAppTheme();
+  const { styles } = useAppTheme();
   const { reduceMotion } = useNativePreferences();
   const { fontScale } = useWindowDimensions();
   const usesLargeText = fontScale > 1.3;
   const [trackWidth, setTrackWidth] = useState(0);
   const modeIndex = mode === 'translation' ? 0 : mode === 'explanation' ? 1 : 2;
   const indicatorPosition = useRef(new Animated.Value(modeIndex)).current;
+  const scrollRef = useRef<ScrollView>(null);
+  const tabOffsets = useRef<Partial<Record<TextMode, number>>>({});
+  const revealActiveMode = useCallback(() => {
+    if (usesLargeText) scrollRef.current?.scrollTo({ x: tabOffsets.current[mode] || 0, animated: !reduceMotion });
+  }, [mode, reduceMotion, usesLargeText]);
+  useEffect(revealActiveMode, [revealActiveMode]);
   const options = [
     { mode: 'translation' as const, label: 'Translate', icon: Languages },
     { mode: 'explanation' as const, label: 'Explain', icon: ScanText },
@@ -3740,7 +3768,7 @@ function PortableTextModeSwitcher({ mode, onChange }: { mode: TextMode; onChange
     outputRange: [0, segmentWidth, segmentWidth * 2],
   });
 
-  return (
+  const controls = (
     <View
       accessibilityRole="tablist"
       onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}
@@ -3765,6 +3793,7 @@ function PortableTextModeSwitcher({ mode, onChange }: { mode: TextMode; onChange
             accessibilityLabel={`${option.label} text mode`}
             accessibilityState={{ selected: active }}
             key={option.mode}
+            onLayout={(event) => { tabOffsets.current[option.mode] = event.nativeEvent.layout.x; if (active) revealActiveMode(); }}
             onPress={() => onChange(option.mode)}
             style={({ pressed }) => [
               styles.textModeButton,
@@ -3779,6 +3808,10 @@ function PortableTextModeSwitcher({ mode, onChange }: { mode: TextMode; onChange
       })}
     </View>
   );
+  return usesLargeText ? <ScrollView ref={scrollRef} horizontal style={styles.textModeScroll}
+    keyboardShouldPersistTaps="handled" showsHorizontalScrollIndicator={false} onContentSizeChange={revealActiveMode}>
+    {controls}
+  </ScrollView> : controls;
 }
 
 type PopupPanelProps = {
@@ -3957,7 +3990,7 @@ function LanguagePicker({
       baseBottomPadding={18}
     >
       <View style={styles.sheetHeader}>
-        <Text style={styles.sheetTitle}>Choose language</Text>
+        <Text maxFontSizeMultiplier={2} style={styles.sheetTitle}>Choose language</Text>
         <IconButton icon={X} label="Close" onPress={onClose} compact />
       </View>
       <TextInput accessibilityLabel="Search languages" placeholder="Search languages" placeholderTextColor={theme.mutedText} value={query} onChangeText={setQuery} clearButtonMode="while-editing" autoCorrect={false} style={styles.languageSearch} />
@@ -4028,10 +4061,6 @@ function SetupWizard({
 
   const updateGeneralAI = (patch: Partial<AISettings['generalAI']>) => {
     setDraft((current) => ({ ...current, generalAI: { ...current.generalAI, ...patch } }));
-  };
-
-  const updateTranslation = (patch: Partial<AISettings>) => {
-    setDraft((current) => ({ ...current, ...patch }));
   };
 
   const updateSpeech = (patch: Partial<AISettings['speechRecognition']>) => {
@@ -4133,7 +4162,7 @@ function SetupWizard({
     <PopupPanel visible={visible} onClose={onSkip} dismissible={!isSaving && !isConfigBusy} panelStyle={styles.setupSheet}>
           <View style={styles.sheetHeader}>
             <View style={styles.sheetHeaderText}>
-              <Text style={styles.sheetTitle}>Set up tabitomo</Text>
+              <Text maxFontSizeMultiplier={2} style={styles.sheetTitle}>Set up tabitomo</Text>
             </View>
             <IconButton icon={X} label="Skip" onPress={onSkip} disabled={isSaving || isConfigBusy} compact />
           </View>
@@ -4603,11 +4632,11 @@ function getOverlayFrame(item: OverlayItem, imageSize: ImageSize) {
     return null;
   }
 
-  let x = 0;
-  let y = 0;
-  let width = 0;
-  let height = 0;
-  let angle = 0;
+  let x: number;
+  let y: number;
+  let width: number;
+  let height: number;
+  let angle: number;
 
   if (item.rotate_rect) {
     const [cx, cy, w, h, rotateAngle] = item.rotate_rect;
@@ -4694,7 +4723,7 @@ function SettingsSheet({
   const [localRuntimeStatuses, setLocalRuntimeStatuses] = useState<Partial<Record<SettingsLocalRuntimeCheckId, string>>>({});
   const [localRuntimeBusy, setLocalRuntimeBusy] = useState<SettingsLocalRuntimeCheckId | null>(null);
   const [installedModelPacks, setInstalledModelPacks] = useState<InstalledModelPack[]>([]);
-  const [modelPackRootUri, setModelPackRootUri] = useState(getModelPackRootUri());
+  const [, setModelPackRootUri] = useState(getModelPackRootUri());
   const [modelPackStatus, setModelPackStatus] = useState<string | null>(null);
   const [modelPackBusyKey, setModelPackBusyKey] = useState<string | null>(null);
   const [modelPackManifestUrl, setModelPackManifestUrl] = useState('');
@@ -5101,25 +5130,6 @@ function SettingsSheet({
     }
   };
 
-  const handleInstallModelPack = async () => {
-    setModelPackBusyKey(MODEL_PACK_INSTALL_BUSY_KEY);
-    setModelPackStatus('Preparing model-pack install...');
-    try {
-      const result = await installModelPackFromManifestUrl({
-        manifestUrl: modelPackManifestUrl,
-        existingInstalled: installedModelPacks,
-        onStatus: setModelPackStatus,
-      });
-      await saveInstalledModelPacks(result.installed);
-      setInstalledModelPacks(result.installed);
-      setModelPackStatus(`${result.installedPack.id} ${result.installedPack.version} installed.`);
-    } catch (error) {
-      setModelPackStatus(error instanceof Error ? error.message : 'Model-pack install failed.');
-    } finally {
-      setModelPackBusyKey(null);
-    }
-  };
-
   const handleInstallOfflineModel = async (modelId: OfflineModelId) => {
     const model = getOfflineModelDefinition(modelId);
     setModelPackBusyKey(model.id);
@@ -5198,7 +5208,7 @@ function SettingsSheet({
       'asr',
       getNativeBaselineModelPackRuntime('asr')
     )
-  ), [draft.speechRecognition.localEngine, installedModelPacks, modelPackRuntimeEnvironment]);
+  ), [draft, installedModelPacks, modelPackRuntimeEnvironment]);
   const ocrModelPackActivation = useMemo(() => (
     selectModelPackActivation(
       installedModelPacks.filter((pack) => pack.id === 'ppocr-v6-small'),
@@ -5422,7 +5432,7 @@ function SettingsSheet({
       >
           <View style={[styles.sheetHeader, styles.settingsHeader]}>
             <View style={styles.sheetHeaderText}>
-              <Text style={styles.sheetTitle}>Settings</Text>
+              <Text maxFontSizeMultiplier={2} style={styles.sheetTitle}>Settings</Text>
             </View>
             <IconButton icon={X} label="Close" onPress={onClose} disabled={isSaving || isConfigBusy} compact />
           </View>
@@ -5953,7 +5963,7 @@ function QRScannerSheet({
     <PopupPanel visible={visible} onClose={onClose} panelStyle={styles.qrScannerSheet}>
           <View style={styles.sheetHeader}>
             <View style={styles.sheetHeaderText}>
-              <Text style={styles.sheetTitle}>Scan settings QR</Text>
+              <Text maxFontSizeMultiplier={2} style={styles.sheetTitle}>Scan settings QR</Text>
             </View>
             <IconButton icon={X} label="Close" onPress={onClose} compact />
           </View>
@@ -5994,7 +6004,7 @@ function DeviceQASheet({
   onClose: () => void;
   onImagePrepared: (prepared: PreparedImageData) => void;
 }) {
-  const { styles, theme } = useAppTheme();
+  const { styles } = useAppTheme();
   const [statuses, setStatuses] = useState<Partial<Record<DeviceQACheckId, string>>>({});
   const [records, setRecords] = useState<Partial<Record<DeviceQACheckId, DeviceQACheckRecord>>>({});
   const [runningId, setRunningId] = useState<DeviceQACheckId | null>(null);
@@ -6840,7 +6850,7 @@ function DeviceQASheet({
     <PopupPanel visible={visible} onClose={onClose} panelStyle={styles.deviceQASheet}>
           <View style={styles.sheetHeader}>
             <View style={styles.sheetHeaderText}>
-              <Text style={styles.sheetTitle}>iOS Device QA</Text>
+              <Text maxFontSizeMultiplier={2} style={styles.sheetTitle}>iOS Device QA</Text>
               <Text style={styles.sheetSubtitle}>Run on a real iPhone before release candidate sign-off.</Text>
             </View>
             <IconButton icon={X} label="Close" onPress={onClose} compact />
@@ -7533,6 +7543,10 @@ function createStyles(theme: AppTheme) {
   languageBar: {
     flexDirection: 'row', alignItems: 'center', gap: 2, padding: 5, marginBottom: 18, borderRadius: 20,
   },
+  languageBarLargeText: { flexDirection: 'column', alignItems: 'stretch' },
+  targetLanguageOnlyLargeText: { flexDirection: 'column', alignItems: 'stretch' },
+  targetLanguageButtonRowLargeText: { maxWidth: '100%' },
+  panelHeaderLargeText: { flexDirection: 'column', alignItems: 'flex-start' },
   languageBarTargetOnly: {
     justifyContent: 'flex-start',
   },
@@ -7951,8 +7965,9 @@ function createStyles(theme: AppTheme) {
   translateButton: { ...controls.primary, minWidth: 108, paddingHorizontal: 18, paddingVertical: 12 },
   translateButtonLargeText: { alignSelf: 'stretch' },
   sourceToolbarLargeText: { flexDirection: 'column', gap: 8, padding: 8 },
-  textModeBarLargeText: { flexDirection: 'column', alignItems: 'stretch' },
-  textModeButtonLargeText: { flex: 0, paddingVertical: 10, borderWidth: 1, borderColor: 'transparent' },
+  textModeScroll: { flexGrow: 0, marginBottom: 16 },
+  textModeBarLargeText: { marginBottom: 0 },
+  textModeButtonLargeText: { flex: 0, paddingVertical: 10, paddingHorizontal: 14, borderWidth: 1, borderColor: 'transparent' },
   settingsCategoryScroll: { flexGrow: 0, flexShrink: 0, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.border },
   settingsHeader: { marginBottom: 4 },
   translateButtonDisabled: { opacity: 0.45, shadowOpacity: 0 },
