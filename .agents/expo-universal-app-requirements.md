@@ -1,10 +1,32 @@
 # tabitomo Expo Universal App Requirements
 
+## 2026-09-20 Safe Area correction
+
+Native workspace, sheets and lightbox now own explicit inset padding per host. A local Expo UIKit geometry module converts view frames into screen coordinates for sheet keyboard avoidance and simulator assertions; native Podfile.lock is synchronized. Web uses CSS safe-area env for the canvas, fixed dialogs and camera/notification controls. This is a platform layout exception with equivalent protected controls, with no shared settings/provider/storage change. Earlier screenshots did not establish correct status-bar avoidance; see [current implementation and evidence](safe-area-review-2026-09-20.md).
+
+## 2026-09-20 移除旧版 HY-MT 与 SiliconFlow
+
+已删除旧版翻译模型的专用 prompt、强制 plain、删尾处理及原生测试场景；删除 SiliconFlow 的 AI/翻译/语音预设。语音统一使用 `openai-compatible`，旧枚举仅在导入边界迁移。Hy-MT2 与通用 API 配置保留。此决策替代下文历史记录中的旧接入说明，详见 [当前接入契约](translation-models.zh-CN.md)。
+
+## 2026-09-20 Mobile design and functional review
+
+Visual follow-up: use concise text for primary actions, functional icons only, neutral content backgrounds, solid indigo buttons and restrained depth. iOS preserves native segmented controls/sheets/materials and adapts navigation/actions to large Dynamic Type. Primary white-on-indigo contrast is 5.65:1. See the HIG follow-up in the [review](mobile-design-functional-review-2026-09-20.md) for sources, evidence and limits.
+
+Mobile now uses shared field/choice/primary-button styles, focused AI settings sections, a single setup completion action, and consistent native sheets. Text/image cancellation restores controls and rejects stale results; the photo primary action reprocesses the photo; same-language Explanation/Q&A match Web. Settings save failures remain recoverable, QR scanning is presented inside its parent sheet, speech sessions reject old callbacks, and iCloud toggles save only committed settings. These are mobile parity repairs; no config schema or encryption-format change was introduced by this review.
+
+Validation: 56 core tests, both typechecks, 444 parity checks, Expo web smoke and Web build passed. Web E2E covered 60 scenarios (58 initial passes plus 2 successful isolated Safari retries). iOS Release simulator passed 16 selected scenes, followed by 3 focused native-sheet checks after the final layout correction. Phone light/dark layouts were inspected at 390×844 and 320×720. Signed-device media, CloudKit and accessibility acceptance remain pending. See the [full review and evidence](mobile-design-functional-review-2026-09-20.md).
+
+## 2026-09-20 Jina OCR
+
+Web and Expo Settings/onboarding share a Jina OCR choice with only an API key. Shared core fixes the official endpoint/model, preserves Markdown as text without fabricated geometry, bounds requests to 60 seconds, and handles cancellation and safe errors. Settings normalization and encrypted config round trips preserve the provider. Qwen endpoint/model fields are collapsed under More options. No native module change is needed. Coverage: core tests, Chromium/WebKit Jina image flow, Expo web 390x844/320x720, parity audit, and the iOS `settings-jina` scene. Real authenticated Jina OCR and signed-device quality remain unverified; see [OCR contract](cloud-ocr-provider-research.zh-CN.md).
+
+Validation: 56 core tests, core/mobile typechecks, Web build, 6 Chromium/WebKit OCR cases, Expo web smoke, and 444 parity checks passed. Web/Expo phone screenshots were reviewed. The focused iOS Release build and install succeeded, but simulator launch and an independent launch-service query hung; the smoke was terminated and its isolated simulator shut down. Native screenshot acceptance remains incomplete.
+
 ## 2026-09-08 design and provider revision
 
-Web and Expo now consume shared light/dark indigo tokens and shared settings normalization. Desktop uses two columns; phone uses native stacked panels. Settings and onboarding include OpenRouter browser authorization with pasted one-time code (PKCE, no callback URL), explicit live model discovery, editable model IDs, and direct completion after AI setup. OCR supports local geometry, General AI text extraction, custom compatible vision text extraction, and the existing explicit Qwen coordinate adapter. ASR accepts arbitrary compatible endpoints; blank model IDs no longer choose TeleAI, and credentials are reused only for the same base URL. Local-network model endpoints may omit a key. There is no bundled native VLM runtime or new claim of on-device benchmark superiority.
+Web and Expo now consume shared light/dark indigo tokens and shared settings normalization. Desktop uses two columns; phone uses native stacked panels. Settings and onboarding use a direct OpenRouter API key field, explicit live model discovery, editable model IDs, and automatic OpenAI-compatible Chat/Responses negotiation. OCR supports local geometry, General AI text extraction, custom compatible vision text extraction, and the existing explicit Qwen coordinate adapter. ASR accepts arbitrary compatible endpoints; blank model IDs no longer choose TeleAI, and credentials are reused only for the same base URL. Local-network model endpoints may omit a key. There is no bundled native VLM runtime or new claim of on-device benchmark superiority.
 
-This supersedes older ledger statements that cloud OCR only accepts Qwen, or that General AI/custom OCR is unavailable. Existing Qwen configs and the legacy `siliconflow` ASR enum remain import-compatible. See [design and model decisions](design-and-model-revision.zh-CN.md) for architecture, candidates, official sources and verification limits. Signed-device account/permissions/CloudKit/model quality checks remain required.
+This supersedes older ledger statements that cloud OCR only accepts Qwen, or that General AI/custom OCR is unavailable. Existing Qwen configs remain import-compatible; old ASR IDs migrate to `openai-compatible` at import. See [design and model decisions](design-and-model-revision.zh-CN.md) for architecture, candidates, official sources and verification limits. Signed-device account/permissions/CloudKit/model quality checks remain required.
 
 
 Status: Implementation in progress
@@ -50,10 +72,6 @@ Latest Expo web smoke coverage:
 Latest native QR import coverage:
 
 - The iOS Release simulator `settings-qr-import` scene generates a real encrypted `.ttconfig` payload in-app, feeds it through the native QR scanner sheet callback, imports it with the same shared-core config decrypt/migration path used by file and clipboard import, validates all provider fields and API-key presence, attempts native settings persistence, and writes a redacted result. The latest smoke recorded `payloadLength=1784`. This proves the callback/import/save wiring but does not replace real camera QR decoding on an iPhone.
-
-Latest native Hunyuan-MT output-mode coverage:
-
-- The iOS Release simulator `settings-hunyuan-output` scene opens mobile Settings with the Hunyuan-MT translation model and an initial structured-output draft, then verifies the Settings UI forces plain output, disables Structured mode for Hunyuan-MT, writes a redacted result, and does not leak the smoke API-key marker. The latest focused and full smokes recorded `model=tencent/Hunyuan-MT-7B` and `outputMode=plain`.
 
 Latest native text-provider coverage:
 
@@ -174,14 +192,14 @@ Expo Go is acceptable only for early cloud-only UI development. It is not a vali
 | Text explanation | Web Explanation mode for words, sentences, and grammar patterns | Native Explain mode using shared General AI assistant prompt, same language selection, same thinking-token cleanup | P0 | Implemented with streaming output; mobile typed input now auto-runs Explanation after debounce and aborts stale streams; mock-provider Expo web E2E smoke passes; Release iOS simulator mock text-provider smoke covers the streaming shared-core Explanation path; real-provider/iPhone QA pending |
 | Quick Q&A | Web Quick Q&A travel-language assistant | Native Q&A mode using shared General AI assistant prompt, same language selection, spoken-question path after ASR | P0 | Implemented with streaming output; mobile typed input now auto-runs Q&A after debounce and aborts stale streams; mock-provider Expo web E2E smoke passes; Release iOS simulator mock text-provider smoke covers the streaming shared-core Q&A path; real-provider/iPhone QA pending |
 | Rich text results | Web renders markdown for VLM, Explanation, and Q&A | Native lightweight markdown renderer for headings, lists, bold, inline code, and code blocks | P1 | Implemented initial; visual QA pending |
-| Translation provider settings | General AI, translation override, API format options | Settings screen with secure API-key storage and same provider fields | P0 | Implemented initial |
-| First-run setup wizard | WelcomeWizard on first launch with manual setup and import paths | Native first-run setup sheet with manual provider setup, quick fill, encrypted config import, file import, and QR scan | P1 | Implemented initial; Expo web first-run/manual/import smoke passes with real encrypted `.ttconfig` import; iOS Release simulator smoke now covers setup choice, manual translation setup, and import setup; real iPhone file import and camera QR decode QA pending |
-| Output modes | Plain/structured output and Hunyuan-MT handling | Shared core parity | P0 | Implemented initial; mobile Settings now mirrors web behavior by forcing plain output and disabling Structured mode when Hunyuan-MT is selected; focused and full Release iOS simulator `settings-hunyuan-output` smokes pass |
+| Translation provider settings | General AI reuse, independent compatible provider, live catalog/manual model ID, automatic Chat/Responses compatibility | Settings screen with secure API-key storage and same provider fields | P0 | Implemented initial |
+| First-run setup wizard | WelcomeWizard on first launch with manual setup and import paths | Native first-run setup sheet with manual provider setup, live model discovery, encrypted config import, file import, and QR scan | P1 | Implemented initial; Expo web first-run/manual/import smoke passes with real encrypted `.ttconfig` import; iOS Release simulator smoke now covers setup choice, manual translation setup, and import setup; real iPhone file import and camera QR decode QA pending |
+| Output modes | Plain/structured output and Hy-MT2 | Shared core parity; newly selected dedicated models default to plain, structured is an advanced option | P0 | Implemented; old model-specific output restrictions removed |
 | Language swap | Swap source/target | Native control | P0 | Implemented initial |
 | Copy result | Clipboard copy with success feedback | Use Expo Clipboard or RN clipboard-compatible package and mirror web `Copy -> Copied`/Check feedback | P0 | Implemented initial |
 | Text-to-speech | Browser speech synthesis | `expo-speech` native TTS | P0 | Implemented initial |
 | Audio recording | `getUserMedia`, `MediaRecorder` | `expo-audio` recording with iOS microphone permission | P0 | Implemented initial |
-| Cloud ASR | SiliconFlow/OpenAI-compatible transcription | Upload native audio file through shared speech helper | P0 | Implemented initial; Release iOS simulator mock speech-provider smoke covers the native FileBlob multipart upload through shared core; real-provider/iPhone mic QA pending |
+| Cloud ASR | OpenAI-compatible transcription | Upload native audio file through shared speech helper | P0 | Implemented initial; Release iOS simulator mock speech-provider smoke covers the native FileBlob multipart upload through shared core; real-provider/iPhone mic QA pending |
 | Realtime transcription | Web realtime/VAD path | Native streaming design required; first release may use record-then-transcribe | P1 | Mobile preserves the imported setting for Web config parity but disables the toggle in iOS Settings with a record-then-transcribe status note; native streaming runtime still required for true parity |
 | Web Speech API | Browser speech recognition | Replace with iOS native speech module or cloud ASR; Web Speech itself is not available | P1 | Apple Speech native replacement implemented initial; real-device verification pending |
 | Image upload | File picker/dropzone plus web image-mode language reversal | `expo-image-picker` photo library import with native image language context | P0 | Implemented initial; Camera/Album only enter image language context after an asset is selected, then swap source/target for OCR/VLM and restore when leaving image context; Expo web album file-picker smoke passes; iOS photo-library QA pending |
@@ -272,7 +290,7 @@ General AI / text env:
 - `TABITOMO_GENERAL_API_KEY`
 - `TABITOMO_GENERAL_ENDPOINT`
 - `TABITOMO_GENERAL_MODEL`
-- `TABITOMO_GENERAL_API_FORMAT` (`openai-chat`, `openai-responses`, or `anthropic`; defaults to `openai-chat`)
+- `TABITOMO_GENERAL_API_FORMAT` is a legacy/internal preference (`openai-chat`, `openai-responses`, or `anthropic`); the UI no longer asks users to choose Chat versus Responses and requests negotiate automatically
 
 Translation override env:
 
@@ -378,7 +396,7 @@ The Device QA surface also includes a Provider speech check that writes a valid 
 
 Implemented in mobile settings:
 
-- General AI: API format, endpoint, model, API key.
+- General AI: provider, endpoint, API key, model; Chat/Responses is negotiated internally. Legacy apiFormat remains an import/export-compatible hint.
 - Translation override: output mode, endpoint, model, API key.
 - Speech: provider, cloud model/key, realtime toggle, fixed local engine/model download, VAD mode, SenseVoice language/ITN, Whisper language/task. Mobile exposes no model path or manifest URL.
 - Image OCR: Local PP-OCR or Alibaba Cloud Model Studio Qwen-OCR, DashScope Beijing/Singapore or Workspace native endpoint, `qwen3.5-ocr`/compatibility model, and Alibaba API key. General AI/custom OCR remain legacy config fields only and are not exposed as adapted coordinate OCR providers.
@@ -624,3 +642,10 @@ Release candidate checks:
 
 - 2026-09-08 iOS-native design exception, explicitly requested by the user: Web and mobile share semantic brand colors and behaviors, while iOS uses UIKit segmented controls, runtime-gated Liquid Glass / system blur, haptics, and swipe-dismissable page sheets. Translation becomes one continuous content surface with a persistent material input toolbar. Keyboard entry collapses the header and modes; settings use inset grouped forms. Expo Web remains a functional fallback, not a simulation of the native material. Native verification adds `main-keyboard`; language search and reopening are covered by Expo smoke. Full rationale and compatibility are in `.agents/design-and-model-revision.zh-CN.md`.
 - 2026-09-08 native language-row refinement: Explain and Q&A align the selected language and chevron to the trailing edge with symmetric content insets and a 44pt minimum touch height. Language names truncate on one line; translation mode retains centered source/target controls. This follows the native presentation exception above; Web, shared-core behavior, and native dependencies are unchanged. Expo screenshot coverage now includes both assistant modes at 390x844 and 320x720 in light and dark appearance.
+
+- 2026-09-20 Settings navigation: section order and labels now come from shared core (`AI`, `Translate`, `Speech`, `Image`, `Offline`, `Data`). Translation is a top-level section on both surfaces, with no nested Connection/Translation navigation. Native uses a horizontally scrolling text tab strip with 48pt minimum targets, unrestricted text scaling, selected-tab reveal, reduced-motion support and keyboard dismissal when switching. Web uses the same text tabs below 700px and a sidebar at desktop widths, with ARIA panel associations and arrow/Home/End keyboard navigation. The section navigation and Save/Cancel remain outside the form scroller; form drafts survive section changes. Native-only Offline remains model-pack management; browser offline options stay with Speech/Image because their runtime differs. Data contains native iCloud plus encrypted config transfer, and embedded config transfer on Web; no CloudKit controls are exposed in browsers. Provider/default/storage/encryption contracts remain unchanged. The existing Web config validator now accepts Jina, matching the shared settings contract and preserving encrypted Jina exports on import.
+- 2026-09-20 iOS switch alignment correction: `SettingToggle` now explicitly applies `alignSelf: 'center'` and `flexShrink: 0` to the system Switch. React Native 0.86's iOS Switch supplies `alignSelf: 'flex-start'`, which overrode the containing row's centering and placed iCloud / Show thinking controls above their labels. This is a native layout correction shared by all mobile toggle rows, with no fixed switch dimensions or transform offsets. The Web Radix switch already uses inline-flex centering and is unchanged; shared settings, provider, persistence and CloudKit behavior are unchanged. Expo smoke checks row/control center alignment and bounds at 320/390 in both themes, plus reversible Show thinking toggling.
+
+## 2026-09-20 Translation model revision
+
+Both platforms share model-family detection and dedicated translation connection updates. No pinned legacy model or forced model upgrade; OpenRouter Hy-MT2 and custom compatible model IDs use the same catalog/manual setup flow. Existing settings and encrypted imports remain compatible. See [behavior contract, official references and verification limits](translation-models.zh-CN.md). The `settings-hymt2` scene verifies the current translation form; the legacy scene was removed.

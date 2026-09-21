@@ -1,5 +1,5 @@
 import { type LanguageCode, SUPPORTED_LANGUAGES } from './languages';
-import { hasProviderConnection, type AISettings, type ImageOCRSettings } from './settings';
+import { hasProviderConnection, JINA_OCR_ENDPOINT, JINA_OCR_MODEL, type AISettings, type ImageOCRSettings } from './settings';
 import {
   formatProviderTextStream,
   generateProviderText,
@@ -115,6 +115,9 @@ export const getVLMModelConfig = (settings: AISettings): VLMModelConfig => {
   if (settings.imageOCR.provider === 'local-ppocr') {
     throw new Error('Local PP-OCR requires the native Expo local-model module on iOS. Switch to General AI or Custom VLM for direct image translation.');
   }
+  if (settings.imageOCR.provider === 'jina') {
+    throw new Error('Jina OCR extracts text. Choose General AI or Custom for direct image translation.');
+  }
   if (settings.imageOCR.provider === 'custom') {
     return { apiFormat: 'openai-chat', apiKey: settings.imageOCR.apiKey, endpoint: settings.imageOCR.endpoint, modelName: settings.imageOCR.modelName || '', useGeneralAI: false };
   }
@@ -152,6 +155,54 @@ const parseDashScopeOCRResponse = (response: DashScopeOCRResponse): OCRTextLocat
     }));
 };
 
+/** Jina's hosted OCR returns Markdown, without reliable overlay geometry. */
+async function performJinaOCR(image: string, apiKey: string, signal?: AbortSignal): Promise<OCRTextLocation[]> {
+  if (!apiKey.trim()) throw new Error('Add your Jina API key in Image OCR settings.');
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  signal?.addEventListener('abort', abort, { once: true });
+  if (signal?.aborted) abort();
+  let timedOut = false;
+  const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 60_000);
+  try {
+    const response = await fetch(`${JINA_OCR_ENDPOINT}/chat/completions`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey.trim()}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: JINA_OCR_MODEL,
+        messages: [{ role: 'user', content: [
+          { type: 'text', text: 'Transcribe the provided document image into a clean Markdown format, preserving the natural reading order.' },
+          { type: 'image_url', image_url: { url: image } },
+        ] }],
+      }),
+      signal: controller.signal,
+    });
+    // Provider bodies can contain submitted media or credentials; use safe, actionable errors.
+    if (response.status === 401 || response.status === 403) throw new Error('Jina OCR could not authorize this key. Check your Jina API key and account access.');
+    if (response.status === 402) throw new Error('Your Jina account needs more credits.');
+    if (response.status === 429) throw new Error('Jina OCR is busy or your quota is reached. Try again shortly.');
+    if (response.status === 408 || response.status === 504) throw new Error('Jina OCR timed out. Please try again.');
+    if (!response.ok) throw new Error(`Jina OCR request failed (HTTP ${response.status}). Please try again.`);
+    let payload: { choices?: Array<{ message?: { content?: unknown }; finish_reason?: string }> } | null;
+    try { payload = await response.json(); }
+    catch (error) {
+      if (controller.signal.aborted) throw error;
+      throw new Error('Jina OCR returned an invalid response. Please try again.');
+    }
+    const choice = Array.isArray(payload?.choices) ? payload.choices[0] : undefined;
+    if (choice?.finish_reason === 'length') throw new Error('Jina OCR could not read the whole image. Try cropping it into smaller sections.');
+    const text = choice?.message?.content;
+    if (typeof text !== 'string') throw new Error('Jina OCR returned an invalid response. Please try again.');
+    return text.trim() ? [{ text: text.trim() }] : [];
+  } catch (error) {
+    if (timedOut && !signal?.aborted) throw new Error('Jina OCR timed out. Please try again.');
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    signal?.removeEventListener('abort', abort);
+  }
+}
+
 export async function performOCR(
   imageBase64: string,
   settings: ImageOCRSettings | AISettings,
@@ -161,6 +212,10 @@ export async function performOCR(
 
   if (imageOCR.provider === 'local-ppocr' && !imageOCR.useGeneralAI) {
     throw new Error('Local OCR is handled by the platform runtime. Select a downloaded model or the native OCR option.');
+  }
+
+  if (imageOCR.provider === 'jina' && !imageOCR.useGeneralAI) {
+    return performJinaOCR(imageBase64, imageOCR.apiKey, abortSignal);
   }
 
   if (imageOCR.provider === 'custom' || imageOCR.useGeneralAI) {
@@ -178,7 +233,7 @@ export async function performOCR(
   }
 
   if (imageOCR.useGeneralAI || imageOCR.provider !== 'qwen') {
-    throw new Error('Unsupported OCR provider. Choose local OCR, General AI, a custom vision model, or the Qwen coordinate adapter.');
+    throw new Error('Unsupported OCR provider. Choose a provider in Image OCR settings.');
   }
   if (!imageOCR.apiKey.trim()) {
     throw new Error('Add an Alibaba Cloud Model Studio API key in Image OCR settings.');

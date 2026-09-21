@@ -36,8 +36,8 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   const iconBg = variant === 'warning' ? 'bg-orange-100 dark:bg-orange-900/30' : 'bg-indigo-100 dark:bg-indigo-900/30';
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="relative w-full max-w-md bg-white dark:bg-gray-800 rounded-3xl shadow-2xl animate-in zoom-in-95 duration-200">
+    <div className="safe-modal fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="relative w-full max-w-md overflow-y-auto bg-white dark:bg-gray-800 rounded-3xl shadow-2xl animate-in zoom-in-95 duration-200">
         {/* Icon */}
         <div className="flex justify-center pt-6 pb-4">
           <div className={`p-4 ${iconBg} rounded-2xl cute-shadow`}>

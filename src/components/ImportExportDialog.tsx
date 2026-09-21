@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { X, ArrowLeftRight, Upload, HardDriveUpload, QrCode, Scan, Eye, EyeOff, FileText } from 'lucide-react';
 import { AISettings } from '../utils/config/settings';
 import { useBackdropClose } from '../hooks/useBackdropClose';
@@ -12,6 +12,7 @@ import { Html5Qrcode } from 'html5-qrcode';
 
 interface ImportExportDialogProps {
   isOpen: boolean;
+  embedded?: boolean;
   onClose: () => void;
   currentSettings: AISettings;
   onImport: (settings: AISettings) => void;
@@ -21,6 +22,7 @@ type Mode = 'export-file' | 'export-qr' | 'import-file' | 'import-qr';
 
 export const ImportExportDialog: React.FC<ImportExportDialogProps> = ({
   isOpen,
+  embedded = false,
   onClose,
   currentSettings,
   onImport,
@@ -35,6 +37,18 @@ export const ImportExportDialog: React.FC<ImportExportDialogProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const qrScannerRef = useRef<Html5Qrcode | null>(null);
   const [isScanning, setIsScanning] = useState(false);
+  const mounted = useRef(true);
+  const scannerGeneration = useRef(0);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      scannerGeneration.current += 1;
+      const scanner = qrScannerRef.current;
+      qrScannerRef.current = null;
+      if (scanner?.isScanning) void scanner.stop().catch(() => {});
+    };
+  }, []);
 
   const handleExportFile = async () => {
     if (!password) {
@@ -48,6 +62,7 @@ export const ImportExportDialog: React.FC<ImportExportDialogProps> = ({
       await exportConfigToFile(currentSettings, password);
       setSuccess('Settings exported successfully!');
       setTimeout(() => {
+        if (!mounted.current) return;
         setPassword('');
         setMode(null);
         setSuccess(null);
@@ -89,9 +104,11 @@ export const ImportExportDialog: React.FC<ImportExportDialogProps> = ({
     setError(null);
     try {
       const settings = await importConfigFromFile(file, password);
+      if (!mounted.current) return;
       onImport(settings);
       setSuccess('Settings imported successfully!');
       setTimeout(() => {
+        if (!mounted.current) return;
         setPassword('');
         setMode(null);
         setSuccess(null);
@@ -113,18 +130,21 @@ export const ImportExportDialog: React.FC<ImportExportDialogProps> = ({
       return;
     }
 
+    const generation = ++scannerGeneration.current;
     setIsScanning(true);
     setError(null);
 
     // Wait for the DOM element to be rendered
     await new Promise(resolve => setTimeout(resolve, 100));
 
+    if (!mounted.current || generation !== scannerGeneration.current) return;
     try {
       const scanner = new Html5Qrcode('qr-reader');
       qrScannerRef.current = scanner;
 
       // Get available cameras
       const cameras = await Html5Qrcode.getCameras();
+      if (!mounted.current || generation !== scannerGeneration.current) return;
       if (!cameras || cameras.length === 0) {
         throw new Error('No cameras found on this device');
       }
@@ -136,14 +156,18 @@ export const ImportExportDialog: React.FC<ImportExportDialogProps> = ({
         cameraId,
         { fps: 10, qrbox: { width: 250, height: 250 } },
         async (decodedText) => {
+          if (!mounted.current || generation !== scannerGeneration.current) return;
           try {
             const settings = await importConfigFromQRCode(decodedText, password);
+            if (!mounted.current || generation !== scannerGeneration.current) return;
             await scanner.stop();
+            if (!mounted.current || generation !== scannerGeneration.current) return;
             qrScannerRef.current = null;
             setIsScanning(false);
             onImport(settings);
             setSuccess('Settings imported successfully!');
             setTimeout(() => {
+              if (!mounted.current) return;
               setPassword('');
               setMode(null);
               setSuccess(null);
@@ -152,6 +176,7 @@ export const ImportExportDialog: React.FC<ImportExportDialogProps> = ({
           } catch (err) {
             setError(`Import failed: ${err instanceof Error ? err.message : 'Invalid password or QR code'}`);
             await scanner.stop();
+            if (!mounted.current || generation !== scannerGeneration.current) return;
             qrScannerRef.current = null;
             setIsScanning(false);
           }
@@ -160,7 +185,11 @@ export const ImportExportDialog: React.FC<ImportExportDialogProps> = ({
           // Ignore scan errors (no QR code detected)
         }
       );
+      if (!mounted.current || generation !== scannerGeneration.current) {
+        if (scanner.isScanning) await scanner.stop();
+      }
     } catch (err) {
+      if (!mounted.current || generation !== scannerGeneration.current) return;
       console.error('QR Scanner error:', err);
       let errorMessage = 'Scanner failed: ';
       if (err instanceof Error) {
@@ -182,6 +211,7 @@ export const ImportExportDialog: React.FC<ImportExportDialogProps> = ({
   };
 
   const stopQRScanner = async () => {
+    scannerGeneration.current += 1;
     if (qrScannerRef.current) {
       try {
         await qrScannerRef.current.stop();
@@ -213,16 +243,16 @@ export const ImportExportDialog: React.FC<ImportExportDialogProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200"
-      {...backdropCloseHandlers}
+      className={embedded ? 'config-inline' : "safe-modal fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200"}
+      {...(embedded ? {} : backdropCloseHandlers)}
       onClick={(e) => e.stopPropagation()}
     >
       <div
-        className="relative w-full max-w-md bg-white dark:bg-gray-800 rounded-3xl shadow-2xl animate-in zoom-in-95 duration-200"
+        className={embedded ? undefined : "config-dialog relative w-full max-w-md bg-white dark:bg-gray-800 rounded-3xl shadow-2xl animate-in zoom-in-95 duration-200"}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+        {!embedded && <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-indigo-500 rounded-xl cute-shadow">
               <ArrowLeftRight className="w-5 h-5 text-white" />
@@ -237,35 +267,32 @@ export const ImportExportDialog: React.FC<ImportExportDialogProps> = ({
           >
             <X className="w-5 h-5" />
           </button>
-        </div>
+        </div>}
 
         {/* Content */}
-        <div className="p-6 max-h-[60vh] overflow-y-auto">
+        <div className={embedded ? undefined : "p-6 max-h-[60vh] overflow-y-auto"}>
           {!mode ? (
             <div className="space-y-4">
-              <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                Choose how you want to import or export your settings. All exports are encrypted with AES-256.
-              </p>
 
               {/* Export Options */}
               <div className="space-y-2">
                 <h3 className="text-sm font-bold text-gray-700 dark:text-gray-300">Export Settings</h3>
                 <div className="grid grid-cols-2 gap-2">
                   <button
+                    aria-label="Export file"
                     onClick={() => setMode('export-file')}
                     className="p-4 rounded-xl border-2 border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors duration-200 min-h-[100px] flex flex-col items-center justify-center"
                   >
                     <FileText className="w-6 h-6 mb-2 text-indigo-500" />
                     <div className="text-sm font-bold text-gray-800 dark:text-white">File</div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">.ttconfig</div>
                   </button>
                   <button
+                    aria-label="Export QR code"
                     onClick={() => setMode('export-qr')}
                     className="p-4 rounded-xl border-2 border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors duration-200 min-h-[100px] flex flex-col items-center justify-center"
                   >
                     <QrCode className="w-6 h-6 mb-2 text-indigo-500" />
                     <div className="text-sm font-bold text-gray-800 dark:text-white">QR Code</div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Scan to share</div>
                   </button>
                 </div>
               </div>
@@ -275,20 +302,20 @@ export const ImportExportDialog: React.FC<ImportExportDialogProps> = ({
                 <h3 className="text-sm font-bold text-gray-700 dark:text-gray-300">Import Settings</h3>
                 <div className="grid grid-cols-2 gap-2">
                   <button
+                    aria-label="Import file"
                     onClick={() => setMode('import-file')}
                     className="p-4 rounded-xl border-2 border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors duration-200 min-h-[100px] flex flex-col items-center justify-center"
                   >
                     <Upload className="w-6 h-6 mb-2 text-purple-500" />
                     <div className="text-sm font-bold text-gray-800 dark:text-white">File</div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">From .ttconfig</div>
                   </button>
                   <button
+                    aria-label="Scan QR code"
                     onClick={() => setMode('import-qr')}
                     className="p-4 rounded-xl border-2 border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors duration-200 min-h-[100px] flex flex-col items-center justify-center"
                   >
                     <Scan className="w-6 h-6 mb-2 text-purple-500" />
                     <div className="text-sm font-bold text-gray-800 dark:text-white">Scan QR</div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Use camera</div>
                   </button>
                 </div>
               </div>
@@ -434,8 +461,7 @@ export const ImportExportDialog: React.FC<ImportExportDialogProps> = ({
               {/* Info */}
               <div className="p-3 bg-indigo-50 dark:bg-indigo-900/30 rounded-xl border border-indigo-200 dark:border-indigo-800">
                 <p className="text-xs text-indigo-800 dark:text-indigo-200">
-                  <strong>Security:</strong> Your settings are encrypted using AES-256 encryption.
-                  Make sure to use a strong password and keep it safe.
+                  {mode.startsWith('export') ? 'Keep your password to import these settings later.' : 'Use the password chosen during export.'}
                 </p>
               </div>
             </div>

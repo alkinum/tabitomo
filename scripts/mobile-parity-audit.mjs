@@ -127,10 +127,10 @@ assert(
 
 await includesAll('apps/mobile/App.tsx', 'Native shell', [
   ['React Native imports', "from 'react-native'"],
-  ['SafeAreaView', 'SafeAreaView'],
+  ['Safe Area layout', 'SafeAreaLayout'],
   ['Pressable interactions', 'Pressable'],
   ['native modal surfaces', 'Modal'],
-  ['native gradient background', 'LinearGradient'],
+  ['neutral content background', 'backgroundColor: theme.field'],
   ['system color scheme', 'useColorScheme'],
   ['native press feedback', 'buttonPressed'],
   ['shadow styling', 'shadowOffset'],
@@ -143,6 +143,10 @@ await includesAll('apps/mobile/App.tsx', 'Native shell', [
   ['interactive sheet dismissal', 'allowSwipeDismissal'],
   ['native material controls', '<NativeMaterial'],
   ['language search', 'accessibilityLabel="Search languages"'],
+  ['large-text toolbar layout', 'styles.sourceToolbarLargeText'],
+  ['large-text mode layout', 'styles.textModeBarLargeText'],
+  ['scrollable large-text settings categories', 'styles.settingsCategoryScroll'],
+  ['reveal selected settings tab', 'revealActiveTab'],
 ]);
 await includesAll('apps/mobile/src/NativeChrome.tsx', 'iOS material availability', [
   ['Liquid Glass API availability', 'isGlassEffectAPIAvailable()'],
@@ -153,12 +157,14 @@ await includesAll('apps/mobile/src/NativeChrome.tsx', 'iOS material availability
   ['selection haptic', 'Haptics.selectionAsync()'],
 ]);
 await includesAll('packages/tabitomo-core/src/designTokens.ts', 'Shared design tokens', [
-  ['brand accent color', "accent: '#6366f1'"],
-  ['web-aligned light gradient start', "gradient: ['#eef2ff'"],
-  ['dark gradient indigo-950', "gradient: ['#111827'"],
+  ['accessible indigo action color', "accent: '#5856d6'"],
+  ['neutral light background', "field: '#f5f5f7'"],
+  ['neutral dark background', "field: '#111113'"],
 ]);
 await excludesAll('apps/mobile/App.tsx', 'Native shell', [
   ['WebView wrapper', 'WebView'],
+  ['decorative action arrow', '<ArrowRight'],
+  ['decorative sparkle', '<Sparkles'],
 ]);
 
 await includesAll('packages/tabitomo-core/src/index.ts', 'Shared core exports', [
@@ -225,13 +231,18 @@ await includesAll('apps/mobile/App.tsx', 'Mobile text/image parity features', [
   ['assistant target-only language state', 'usesTargetOnlyLanguageBar'],
   ['assistant target-only language style', 'languageBarTargetOnly'],
   ['assistant target-only language label', 'Target Language'],
-  ['image mode segmented control', 'SegmentButton label="VLM"'],
-  ['OCR overlay segmented control', "? 'OCR text' : 'OCR overlay'"],
+  ['image mode segmented control', 'SegmentButton label="Vision translation"'],
+  ['OCR overlay segmented control', "supportsOCROverlay(settings.imageOCR) ? 'OCR overlay' : 'OCR text'"],
   ['copy action', 'handleCopy'],
   ['copy success state', 'const [resultCopied, setResultCopied]'],
   ['copy success reset timer', 'resultCopyResetTimerRef'],
   ['copy success label', "label={resultCopied ? 'Copied' : 'Copy'}"],
   ['TTS action', 'Speech.speak'],
+  ['cancel work on input changes', 'onChangeText={handleEditSource}'],
+  ['cancel image requests', 'imageActionAbortRef.current?.abort()'],
+  ['stop result audio', "label={isSpeaking ? 'Stop audio' : 'Listen'}"],
+  ['settings save feedback', 'Could not save settings. Try again.'],
+  ['same-language assistant requests', "mode === 'translation' && sourceLang === targetLang"],
   ['markdown renderer', 'function MarkdownText'],
   ['furigana renderer', 'function FuriganaText'],
   ['image lightbox', 'function ImageLightbox'],
@@ -258,19 +269,22 @@ await includesAll('apps/mobile/App.tsx', 'Image parity features', [
   ['library entry', "handlePickImage('library')"],
   ['enter image language context', 'enterImageLanguageContext'],
   ['leave image language context', 'leaveImageLanguageContext'],
-  ['OCR config guidance', 'OCR Service Not Configured'],
-  ['VLM config guidance', 'VLM Service Not Configured'],
+  ['OCR config guidance', 'OCR setup needed'],
+  ['VLM config guidance', 'Vision translation setup needed'],
   ['Vision OCR QA', "'vision-ocr'"],
   ['image provider QA', "'provider-image'"],
 ]);
 
 await includesAll('src/components/SettingsPanel.tsx', 'Web settings surface', [
+  ['shared section order', 'SETTINGS_SECTIONS'],
+  ['Data tab', 'value="config"'],
+  ['embedded config transfer', 'ImportExportDialog embedded'],
   ['General tab', 'value="general"'],
   ['Translation tab', 'value="translation"'],
   ['Speech tab', 'value="speech"'],
   ['Image tab', 'value="image"'],
-  ['General AI format', 'settings.generalAI.apiFormat'],
-  ['translation output mode', 'settings.translation?.outputMode'],
+  ['General AI key', 'settings.generalAI.apiKey'],
+  ['shared translation form', '<TranslationConnection'],
   ['speech provider', 'settings.speechRecognition.provider'],
   ['local ASR engine', 'localEngine'],
   ['shared OCR form', '<OCRSettings'],
@@ -279,13 +293,19 @@ await includesAll('src/components/SettingsPanel.tsx', 'Web settings surface', [
   ['editable speech endpoint', 'id="speechEndpoint"'],
 ]);
 
+await includesAll('src/components/ui/Tabs.tsx', 'Accessible settings navigation', [
+  ['tablist role', 'role="tablist"'], ['selected tab', 'aria-selected={selected}'],
+  ['panel association', 'aria-labelledby={`${id}-tab-${value}`}'],
+  ['keyboard navigation', "'Home', 'End'"], ['roving focus', 'tabIndex={selected ? 0 : -1}'],
+]);
+
 for (const file of ['src/components/SettingsPanel.tsx', 'src/components/WelcomeWizard.tsx']) {
   await includesAll(file, 'Shared setup and settings forms', [
-    ['AI connection', '<AIConnection'], ['OCR configuration', '<OCRSettings'],
+    ['AI connection', '<AIConnection'], ['OCR configuration', '<OCRSettings'], ['translation configuration', '<TranslationConnection'],
   ]);
 }
 await includesAll('src/components/OCRSettings.tsx', 'Provider-independent OCR form', [
-  ['mode contract', 'selectOCRMode'], ['general model reuse', 'general'], ['custom model', 'custom'], ['editable model ID', 'ocr.modelName'],
+  ['mode contract', 'selectOCRMode'], ['shared provider choices', 'OCR_MODE_OPTIONS'], ['custom model', 'custom'], ['editable model ID', 'ocr.modelName'],
 ]);
 await includesAll('src/utils/translation/translation.ts', 'Shared Web text requests', [['core translator', 'tabitomo-core/src/translation']]);
 await includesAll('src/utils/translation/explanation.ts', 'Shared Web assistant requests', [['core assistant', 'tabitomo-core/src/assistant']]);
@@ -293,15 +313,15 @@ await includesAll('src/utils/image/imageOcr.ts', 'Shared Web image requests', [[
 await includesAll('src/designTheme.ts', 'Web shared palette', [['light tokens', 'lightTheme'], ['dark tokens', 'darkTheme']]);
 for (const file of ['src/components/AIConnection.tsx', 'apps/mobile/src/AIConnection.tsx']) {
   await includesAll(file, 'Provider connection parity', [
-    ['PKCE session', 'createOpenRouterSession'], ['authorization exchange', 'exchangeOpenRouterCode'],
+    ['provider presets', 'GENERAL_AI_PRESETS'], ['direct connection fields', '{children}'],
     ['model discovery', 'fetchAvailableModels'], ['request cleanup', 'request.current?.abort()'],
   ]);
 }
 
 await includesAll('apps/mobile/App.tsx', 'Mobile settings parity surface', [
   ['General AI section', 'title="General AI"'],
-  ['General AI protocol selector', 'options={API_FORMAT_OPTIONS.map'],
-  ['Translation override section', 'title="Translation override"'],
+  ['General AI secure key', 'value={draft.generalAI.apiKey}'],
+  ['Translation model section', 'title="Translation model"'],
   ['Speech section', 'title="Speech"'],
   ['Image OCR section', 'title="Image OCR"'],
   ['VLM section', 'title="VLM image translation"'],
@@ -311,22 +331,26 @@ await includesAll('apps/mobile/App.tsx', 'Mobile settings parity surface', [
   ['Settings category items', 'SETTINGS_CATEGORY_ITEMS'],
   ['Initial Settings jump target', 'initialJumpId'],
   ['Settings jump category mapping', 'getSettingsCategoryForJump'],
-  ['AI category view', "activeSettingsCategory === 'ai'"],
+  ['AI category view', "activeSettingsCategory === 'general'"],
+  ['Translation category view', "activeSettingsCategory === 'translation'"],
+  ['shared section order', 'SETTINGS_SECTIONS'],
   ['Speech category view', "activeSettingsCategory === 'speech'"],
   ['Image category view', "activeSettingsCategory === 'image'"],
   ['Offline category view', "activeSettingsCategory === 'offline'"],
   ['Config category view', "activeSettingsCategory === 'config'"],
-  ['native runtime section', 'title="Native local runtime"'],
+  ['native runtime section', 'title="Offline checks"'],
   ['local models section', 'title="Local models"'],
-  ['Hunyuan plain-output parity', 'Hunyuan-MT requires plain text output'],
   ['iCloud sync section', 'title="iCloud sync"'],
   ['truthful iCloud status', 'cloudSyncStatus.detail'],
   ['iCloud opt-out toggle', 'Sync settings with iCloud'],
   ['iCloud conflict help', 'newer edit wins'],
+  ['center native settings switches', 'style={styles.toggleSwitch}'],
   ['settings help entry', 'function SettingsSection'],
   ['settings help popup', 'Alert.alert(title, help)'],
   ['native keyboard handling', 'KeyboardAvoidingView'],
-  ['Alibaba Qwen OCR provider', 'Alibaba Qwen-OCR'],
+  ['shared OCR provider choices', 'OCR_MODE_OPTIONS'],
+  ['Jina key-only setup', 'label="Jina API key"'],
+  ['collapsed OCR advanced options', 'More options'],
   ['shared OCR mode contract', 'selectOCRMode'],
 ]);
 
@@ -336,6 +360,16 @@ await includesAll('packages/tabitomo-core/src/image.ts', 'Shared native Qwen OCR
   ['default Qwen 3.5 OCR model', "'qwen3.5-ocr'"],
   ['legacy endpoint normalization', "endsWith('/compatible-mode/v1')"],
   ['custom OCR extraction', "imageOCR.provider === 'custom'"],
+]);
+
+await includesAll('packages/tabitomo-core/src/inputOptions.ts', 'Shared OCR choices', [
+  ['Jina provider', "label: 'Jina OCR'"], ['Qwen provider', "label: 'Alibaba Qwen-OCR'"],
+]);
+await includesAll('src/components/OCRSettings.tsx', 'Compact Web OCR setup', [
+  ['shared provider choices', 'OCR_MODE_OPTIONS'], ['Jina key-only setup', 'Jina API key'], ['advanced options', 'More options'],
+]);
+await includesAll('packages/tabitomo-core/src/image.ts', 'Shared Jina adapter', [
+  ['fixed endpoint', 'JINA_OCR_ENDPOINT'], ['fixed model', 'JINA_OCR_MODEL'], ['cancellation', "removeEventListener('abort'"],
 ]);
 
 await includesAll('apps/mobile/plugins/withSceneLifecycle.js', 'iOS scene lifecycle', [
@@ -382,7 +416,7 @@ await includesAll('src/components/WelcomeWizard.tsx', 'Web setup/import surface'
   ['import settings choice', 'Import Settings'],
   ['file import', 'handleImportFile'],
   ['QR scanner', 'startQRScanner'],
-  ['SiliconFlow quick fill', 'handleQuickFillSiliconFlow'],
+  ['translation provider form', '<TranslationConnection'],
   ['password reveal toggle', 'showPassword'],
 ]);
 
@@ -396,7 +430,7 @@ await includesAll('apps/mobile/App.tsx', 'Mobile setup/import parity surface', [
   ['secure field reveal toggle', 'secureFieldReveal'],
   ['file import', 'handleImportConfigFile'],
   ['QR scanner sheet', 'QRScannerSheet'],
-  ['protocol selector', 'options={API_FORMAT_OPTIONS.map'],
+  ['direct setup connection', '<AIConnection'],
 ]);
 
 await includesAll('src/components/ImportExportDialog.tsx', 'Web config portability', [
@@ -422,7 +456,7 @@ await includesAll('apps/mobile/App.tsx', 'Mobile config portability', [
 ]);
 
 await includesAll('apps/mobile/App.tsx', 'Local model parity track', [
-  ['native local runtime status', 'title="Native local runtime"'],
+  ['native local runtime status', 'title="Offline checks"'],
   ['model pack install', 'installModelPackFromManifestUrl'],
   ['model pack bytes install', 'installModelPackFromBytes'],
   ['installed pack activation', 'selectModelPackActivation'],
@@ -505,7 +539,6 @@ for (const scene of [
   'settings-qr',
   'settings-qr-import',
   'settings-config-roundtrip',
-  'settings-hunyuan-output',
   'text-provider-smoke',
   'image-provider-smoke',
   'speech-provider-smoke',
@@ -592,6 +625,54 @@ await includesAll('scripts/provider-smoke.ts', 'Real provider smoke parity cover
   ['VLM', "'vlm'"],
   ['OCR', "'ocr'"],
   ['ASR', "'asr'"],
+]);
+
+
+for (const file of ['src/components/AIConnection.tsx', 'apps/mobile/src/AIConnection.tsx', 'packages/tabitomo-core/src/connections.ts']) {
+  await excludesAll(file, 'Direct API key connection', [['no authorization session', 'createOpenRouterSession'], ['no code exchange', 'exchangeOpenRouterCode']]);
+}
+for (const file of ['src/components/SettingsPanel.tsx', 'src/components/WelcomeWizard.tsx', 'apps/mobile/App.tsx']) {
+  await excludesAll(file, 'Automatic API compatibility', [['no protocol picker', 'API_FORMAT_OPTIONS']]);
+}
+await includesAll('packages/tabitomo-core/src/provider.ts', 'Shared API compatibility', [
+  ['automatic transport', 'requestOpenAI'], ['bounded protocol fallback', 'isUnsupportedProtocol'], ['Responses image input', "type: 'input_image'"],
+]);
+
+
+await includesAll('packages/tabitomo-core/src/translationModels.ts', 'Translation model families', [
+  ['MT2 capability', "'hy-mt2'"],
+]);
+for (const file of ['src/components/TranslationConnection.tsx', 'apps/mobile/App.tsx']) {
+  await includesAll(file, 'Translation model configuration parity', [
+    ['shared connection updates', 'updateTranslationConnection'], ['translation catalog', 'purpose="translation"'],
+    ['advanced output', 'More options'],
+  ]);
+}
+
+for (const file of ['packages/tabitomo-core/src/providerPresets.ts', 'apps/mobile/App.tsx', 'src/components/TranslationConnection.tsx', 'packages/tabitomo-core/src/translation.ts']) {
+  await excludesAll(file, 'Removed legacy provider integration', [
+    ['no SiliconFlow integration', 'siliconflow'], ['no old Hunyuan handler', 'Hunyuan-MT-7B'],
+    ['no forced output restriction', 'requiresPlainTranslationOutput'], ['no trailing translation deletion', 'filterTrailingBrackets'],
+  ]);
+}
+await includesAll('packages/tabitomo-core/src/settings.ts', 'Generic transcription migration', [
+  ['generic provider type', "'openai-compatible'"], ['import boundary migration', 'normalizeSpeechRecognitionProvider'],
+]);
+
+await includesAll('apps/mobile/src/SafeAreaLayout.tsx', 'Measured native Safe Area', [
+  ['system insets', 'useSafeAreaInsets'], ['top padding', 'paddingTop: insets.top'],
+  ['bottom padding', 'paddingBottom: bottomInset'], ['screen geometry', 'getScreenFrameAsync'],
+  ['sheet keyboard intersection', 'frame.y + frame.height - keyboard.screenY'],
+  ['native geometry required in simulator', 'nativeScreenCoordinates: Boolean(nativeLayout)'],
+]);
+await includesAll('apps/mobile/modules/tabitomo-layout/ios/TabitomoLayoutModule.swift', 'UIKit coordinate conversion', [
+  ['view lookup', 'findView(withTag: tag'], ['screen conversion', 'window.screen.coordinateSpace'],
+  ['main thread', '.runOnQueue(.main)'],
+]);
+await includesAll('apps/mobile/App.tsx', 'Safe Area host boundaries', [
+  ['root initial metrics', 'initialMetrics={initialWindowMetrics}'],
+  ['workspace layout', 'name="workspace"'], ['native sheet layout', 'name="sheet"'],
+  ['full-screen preview layout', 'name="lightbox"'], ['dismissal regression', "'safe-area-return'"],
 ]);
 
 const failures = checks.filter((check) => !check.ok);

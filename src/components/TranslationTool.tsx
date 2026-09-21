@@ -4,12 +4,13 @@ import { hasProviderConnection } from '../utils/config/settings';
 import React, { useEffect, useState, useRef, lazy, Suspense } from 'react';
 import { translateText, SUPPORTED_LANGUAGES, type LanguageCode } from '../utils/translation/translation';
 import { speakText, getSpeechLocale } from '../utils/audio/speech';
-import { transcribeAudioSiliconFlow } from '../utils/audio/audioTranscription';
+import { transcribeCloudAudio } from '../utils/audio/audioTranscription';
 import { RealtimeTranscriptionService } from '../utils/audio/realtimeTranscription';
 import { localAsrService } from '../utils/audio/localAsr';
 import { performOCR, imageToBase64, streamTranslateImageWithVLM } from '../utils/image/imageOcr';
+import { supportsOCROverlay } from '../../packages/tabitomo-core/src/inputOptions';
 import { explainWord, quickQA } from '../utils/translation/explanation';
-import { Mic, Image as ImageIcon, ArrowLeftRight, X, Copy, Check, Volume2, Camera, Keyboard, Settings, MessageCircle, Languages, ScanText, Sparkles, Eraser, ArrowRight, Loader2 } from 'lucide-react';
+import { Mic, Image as ImageIcon, ArrowLeftRight, X, Copy, Check, Volume2, Camera, Keyboard, Settings, Loader2 } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import { AISettings } from '../utils/config/settings';
 import { ImageLightbox } from './ImageLightbox';
@@ -140,7 +141,7 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
       // Using OCR settings - check if OCR is using General AI or its own settings
       if (settings.imageOCR.useGeneralAI) {
         return isGeneralAIConfigured();
-      } else if (settings.imageOCR.provider === 'local-ppocr') {
+      } else if (settings.imageOCR.provider === 'local-ppocr' || settings.imageOCR.provider === 'jina') {
         return false;
       } else {
         return !!(hasProviderConnection(settings.imageOCR));
@@ -572,7 +573,7 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
     }
 
     // Use cloud or local transcription providers when configured
-    if (speechProvider === 'siliconflow' || speechProvider === 'local') {
+    if (speechProvider === 'openai-compatible' || speechProvider === 'local') {
       // Check if realtime transcription is enabled
       const useRealtime = settings.speechRecognition.enableRealtimeTranscription !== false;
 
@@ -663,7 +664,7 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
             try {
               const transcribedText = speechProvider === 'local'
                 ? await localAsrService.transcribeBlob(audioBlob, settings, { sourceLang })
-                : await transcribeAudioSiliconFlow(audioBlob, settings);
+                : await transcribeCloudAudio(audioBlob, settings);
               setSourceText(transcribedText);
               if (transcribedText) {
                 runCurrentText(transcribedText);
@@ -1328,13 +1329,13 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
   const resultTitle = inputMethod === 'qa' ? 'Answer' : textMode === 'explanation' ? 'Explanation' : 'Translation';
   return <main className="tabitomo-workspace" aria-label="Translation workspace">
     <header className="workspace-brandbar">
-      <div className="workspace-brand"><img src="/icons/buddy.png" alt="" /><div><h1>tabitomo</h1><p>A little help, wherever you go.</p></div></div>
+      <div className="workspace-brand"><img src="/icons/buddy.png" alt="" /><h1>tabitomo</h1></div>
       <button type="button" className="workspace-icon" title="Settings" aria-label="Settings" onClick={() => onOpenSettings()}><Settings size={20} /></button>
     </header>
     <nav className="workspace-modes" aria-label="Assistant mode">
-      <button disabled={isRecording} aria-pressed={!assistantMode} onClick={() => selectWorkspaceMode('translation')}><Languages size={17} />Translate</button>
-      <button disabled={isRecording} aria-pressed={inputMethod === 'text' && textMode === 'explanation'} onClick={() => selectWorkspaceMode('explanation')}><ScanText size={17} />Explain</button>
-      <button disabled={isRecording} aria-pressed={inputMethod === 'qa'} onClick={() => selectWorkspaceMode('qa')}><MessageCircle size={17} />Q&A</button>
+      <button disabled={isRecording} aria-pressed={!assistantMode} onClick={() => selectWorkspaceMode('translation')}>Translate</button>
+      <button disabled={isRecording} aria-pressed={inputMethod === 'text' && textMode === 'explanation'} onClick={() => selectWorkspaceMode('explanation')}>Explain</button>
+      <button disabled={isRecording} aria-pressed={inputMethod === 'qa'} onClick={() => selectWorkspaceMode('qa')}>Q&A</button>
     </nav>
     <div className="workspace-languages">
       {/* For explanation and Q/A: Only show target language */}
@@ -1347,7 +1348,7 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
     </div>
     <div className="workspace-content">
       <section className="workspace-source" aria-label="Source">
-        <div className="workspace-panel-heading"><h2><Languages size={17} />{inputMethod === 'image' ? 'Photo' : inputMethod === 'qa' ? 'Your question' : 'Source'}</h2>{(sourceText || image) && <button className="workspace-clear" aria-label="Clear" title="Clear" disabled={isRecording} onClick={() => { if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current); translationAbortControllerRef.current?.abort(); explanationAbortControllerRef.current?.abort(); qaAbortControllerRef.current?.abort(); imageAbortControllerRef.current?.abort(); setSourceText(''); setTargetText(''); setImage(null); setTranslatedImage(null); setIsTranslating(false); setIsProcessingImage(false); setError(null); }}><Eraser size={16} />Clear</button>}</div>
+        <div className="workspace-panel-heading"><h2>{inputMethod === 'image' ? 'Photo' : inputMethod === 'qa' ? 'Your question' : 'Source'}</h2>{(sourceText || image) && <button className="workspace-clear" aria-label="Clear" title="Clear" disabled={isRecording} onClick={() => { if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current); translationAbortControllerRef.current?.abort(); explanationAbortControllerRef.current?.abort(); qaAbortControllerRef.current?.abort(); imageAbortControllerRef.current?.abort(); setSourceText(''); setTargetText(''); setImage(null); setTranslatedImage(null); setIsTranslating(false); setIsProcessingImage(false); setError(null); }}>Clear</button>}</div>
         {inputMethod === 'image' ? <div className="workspace-photo">
           {image ? <><img src={image} alt="Original" /><button className="workspace-icon photo-remove" aria-label="Remove image" onClick={() => { imageAbortControllerRef.current?.abort(); setIsProcessingImage(false); setImage(null); setTranslatedImage(null); setTargetText(''); }}><X size={17} /></button></> : <div {...getRootProps()} className="workspace-dropzone"><input {...getInputProps()} /><ImageIcon size={30} /><strong>Bring a photo, find the words.</strong><span>Drop an image or tap to choose</span><button className="workspace-secondary" onClick={(e) => { e.stopPropagation(); setIsCameraOpen(true); }}><Camera size={16} />Open camera</button></div>}
         </div> : <textarea ref={textareaRef} aria-label="Source text" value={sourceText + (interimTranscript && isRecording ? (sourceText ? ' ' : '') + interimTranscript : '')} onChange={handleTextChange} placeholder={isRecording ? 'Listening…' : inputMethod === 'qa' ? 'How do I ask for the check?' : textMode === 'explanation' ? 'A word, a phrase, something new…' : `What would you like to say in ${SUPPORTED_LANGUAGES[sourceLang]}?`} readOnly={isRecording} className="workspace-textarea custom-scrollbar" onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); runText(); } }} />}
@@ -1357,23 +1358,22 @@ export const TranslationTool: React.FC<TranslationToolProps> = ({ settings, onOp
             <button className="workspace-icon" aria-label={inputMethod === 'image' ? 'Text/Audio input' : 'Image input'} title={inputMethod === 'image' ? 'Text/Audio input' : 'Image input'} aria-pressed={inputMethod === 'image'} disabled={isRecording} onClick={() => { handleInputMethodChange(inputMethod === 'image' ? 'text' : 'image'); setTextMode('translation'); }} >{inputMethod === 'image' ? <Keyboard size={19} /> : <Camera size={19} />}</button>
 
           </div>
-          <button className="workspace-primary" disabled={busy || isRecording || (inputMethod === 'image' ? !image : !sourceText.trim())} onClick={() => inputMethod === 'image' && image ? processImage(image) : runText()}>{busy ? <Loader2 size={16} className="animate-spin" /> : <ArrowRight size={17} />}{inputMethod === 'qa' ? 'Ask' : textMode === 'explanation' ? 'Explain' : 'Translate'}</button>
+          <button className="workspace-primary" disabled={busy || isRecording || (inputMethod === 'image' ? !image : !sourceText.trim())} onClick={() => inputMethod === 'image' && image ? processImage(image) : runText()}>{busy && <Loader2 size={16} className="animate-spin" />}{inputMethod === 'qa' ? 'Ask' : textMode === 'explanation' ? 'Explain' : 'Translate'}</button>
         </div>
-        {inputMethod === 'image' && <div className="workspace-image-modes"><button aria-pressed={!useVLMMode} onClick={() => { setUseVLMMode(false); if (image) void processImage(image, false); }}>OCR text{!settings.imageOCR.useGeneralAI && settings.imageOCR.provider !== 'custom' ? ' + overlay' : ''}</button><button aria-pressed={useVLMMode} onClick={() => { setUseVLMMode(true); if (image) void processImage(image, true); }}>Vision translation</button></div>}
+        {inputMethod === 'image' && <div className="workspace-image-modes"><button aria-pressed={!useVLMMode} onClick={() => { setUseVLMMode(false); if (image) void processImage(image, false); }}>OCR text{supportsOCROverlay(settings.imageOCR) ? ' + overlay' : ''}</button><button aria-pressed={useVLMMode} onClick={() => { setUseVLMMode(true); if (image) void processImage(image, true); }}>Vision translation</button></div>}
       </section>
       <section className="workspace-result" aria-label={resultTitle} aria-busy={busy}>
-        <div className="workspace-panel-heading"><h2><Sparkles size={17} />{resultTitle}</h2><span>{SUPPORTED_LANGUAGES[targetLang]}</span></div>
+        <div className="workspace-panel-heading"><h2>{resultTitle}</h2><span>{SUPPORTED_LANGUAGES[targetLang]}</span></div>
         <div className="workspace-result-body custom-scrollbar" ref={targetInputRef}>
           {busy && !targetText ? <div role="status" className="workspace-empty"><Loader2 size={26} className="animate-spin" /><strong>{isProcessingImage ? 'Reading your photo…' : 'Finding the right words…'}</strong></div>
           : error ? <div role="alert" className="workspace-empty workspace-error"><p>{error}</p><button className="workspace-secondary" onClick={() => onOpenSettings(inputMethod === 'image' ? 'image' : 'general')}>Open Settings</button></div>
           : translatedImage && !useVLMMode ? <img src={translatedImage} alt="Translated" className="workspace-translated-image" onClick={() => setIsLightboxOpen(true)} />
           : targetText ? <>{isThinking && <p className="workspace-thinking" role="status">Thinking…</p>}{useVLMMode || assistantMode ? <div className="prose dark:prose-invert prose-sm max-w-none"><ReactMarkdown remarkPlugins={[remarkGfm]}>{targetText}</ReactMarkdown></div> : furiganaHtml ? <div className="whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: furiganaHtml }} /> : <p className="whitespace-pre-wrap">{targetText}</p>}</>
-          : <div className="workspace-empty"><div className="workspace-empty-icon"><Sparkles size={25} strokeWidth={1.5} /></div><strong>{inputMethod === 'qa' ? 'A little local knowledge.' : textMode === 'explanation' ? 'Make sense of something new.' : 'Good conversations start here.'}</strong><p>{inputMethod === 'qa' ? 'Ask a question and get a quick answer' : textMode === 'explanation' ? 'Enter text to see its explanation' : 'Translation will appear here'}</p>{!isGeneralAIConfigured() && !(hasProviderConnection(settings)) && <button className="workspace-secondary" onClick={() => onOpenSettings('general')}>Connect your AI <ArrowRight size={15} /></button>}</div>}
+          : <div className="workspace-empty"><p>{inputMethod === 'qa' ? 'Ask a question and get a quick answer' : textMode === 'explanation' ? 'Enter text to see its explanation' : 'Translation will appear here'}</p>{!isGeneralAIConfigured() && !(hasProviderConnection(settings)) && <button className="workspace-secondary" onClick={() => onOpenSettings('general')}>Connect your AI</button>}</div>}
         </div>
-        <div className="workspace-result-toolbar"><span>{copied ? 'Copied to clipboard' : targetText ? 'Ready for your next conversation' : 'Your words, a little closer.'}</span><div className="workspace-toolbar-group"><button className="workspace-icon" disabled={!targetText} aria-label="Play audio" title="Play audio" onClick={() => speakText(targetText, targetLang)}><Volume2 size={18} /></button><button className="workspace-icon" disabled={!targetText} aria-label="Copy to clipboard" title="Copy to clipboard" onClick={copyToClipboard}>{copied ? <Check size={18} /> : <Copy size={18} />}</button></div></div>
+        <div className="workspace-result-toolbar"><span role="status">{copied ? 'Copied to clipboard' : ''}</span><div className="workspace-toolbar-group"><button className="workspace-icon" disabled={!targetText} aria-label="Play audio" title="Play audio" onClick={() => speakText(targetText, targetLang)}><Volume2 size={18} /></button><button className="workspace-icon" disabled={!targetText} aria-label="Copy to clipboard" title="Copy to clipboard" onClick={copyToClipboard}>{copied ? <Check size={18} /> : <Copy size={18} />}</button></div></div>
       </section>
     </div>
-    <footer className="workspace-footer"><span>Text · Voice · Photos</span><span>Made for the moments in between.</span></footer>
     <Suspense fallback={null}><CameraPanel isOpen={isCameraOpen} onClose={() => setIsCameraOpen(false)} onCapture={handleCameraCapture} /></Suspense>
     <ImageLightbox isOpen={isLightboxOpen} imageUrl={translatedImage} onClose={() => setIsLightboxOpen(false)} />
   </main>;

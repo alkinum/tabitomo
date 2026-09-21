@@ -80,10 +80,10 @@ export function App() {
 
   return (
     <div className="app-canvas min-h-screen flex items-center justify-center p-4" style={{
-      paddingTop: 'max(1rem, env(safe-area-inset-top))',
-      paddingBottom: 'max(1rem, env(safe-area-inset-bottom))',
-      paddingLeft: 'max(1rem, env(safe-area-inset-left))',
-      paddingRight: 'max(1rem, env(safe-area-inset-right))'
+      paddingTop: 'max(1rem, var(--tt-safe-top))',
+      paddingBottom: 'max(1rem, var(--tt-safe-bottom))',
+      paddingLeft: 'max(1rem, var(--tt-safe-left))',
+      paddingRight: 'max(1rem, var(--tt-safe-right))'
     }}>
       {/* Main Content */}
       {currentSettings && (

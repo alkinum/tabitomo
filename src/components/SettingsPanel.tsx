@@ -1,8 +1,12 @@
+import { TranslationConnection } from './TranslationConnection';
+import { hasTranslationOverride } from '../../packages/tabitomo-core/src/translationConnection';
+import { clearTranslationOverride } from '../../packages/tabitomo-core/src/providerPresets';
+import { SETTINGS_SECTIONS, type SettingsSectionId } from '../../packages/tabitomo-core/src/settingsNavigation';
 import { OCRSettings } from './OCRSettings';
 import { AIConnection } from './AIConnection';
 import React, { useState, lazy, Suspense } from 'react';
-import { X, Save, Settings as SettingsIcon, Sparkles, Mic, Image as ImageIcon, ArrowLeftRight, Languages, CheckCircle, AlertCircle, CircleHelp } from 'lucide-react';
-import { AISettings, saveSettings, loadSettings, DEFAULT_SETTINGS, API_FORMAT_OPTIONS, type APIFormat, type LocalAsrEngine, type LocalVadMode, type SenseVoiceLanguage, type WhisperTask } from '../utils/config/settings';
+import { X, Settings as SettingsIcon, Mic, Image as ImageIcon, ArrowLeftRight, Languages, CheckCircle, AlertCircle, CircleHelp } from 'lucide-react';
+import { AISettings, saveSettings, loadSettings, DEFAULT_SETTINGS, type LocalAsrEngine, type LocalVadMode, type SenseVoiceLanguage, type WhisperTask } from '../utils/config/settings';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/Tabs';
 import { Switch } from './ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
@@ -20,22 +24,27 @@ interface SettingsPanelProps {
   initialTab?: 'general' | 'translation' | 'speech' | 'image';
 }
 
-const SETTINGS_HELP: Record<'general' | 'translation' | 'speech' | 'image', { title: string; body: string }> = {
+type WebSettingsSection = Exclude<SettingsSectionId, 'offline'>;
+const SETTINGS_ICONS = { general: SettingsIcon, translation: Languages, speech: Mic, image: ImageIcon, config: ArrowLeftRight };
+const WEB_SETTINGS_SECTIONS = SETTINGS_SECTIONS.filter((section): section is typeof SETTINGS_SECTIONS[number] & { id: WebSettingsSection } => section.id !== 'offline');
+
+const SETTINGS_HELP: Record<WebSettingsSection, { title: string; body: string }> = {
   general: {
     title: 'General AI',
-    body: 'General AI powers explanations, Quick Q&A, and features configured to reuse the main provider. Match the API format to your endpoint, then enter the provider model name and API key. Load the provider model catalog or enter a model ID.',
+    body: 'General AI powers explanations, Quick Q&A, and features configured to reuse the main provider. Enter your provider API key and choose a model. Compatible API formats are detected automatically. Photo translation needs an image-capable model. Keys stay in this browser and are sent only to your provider. Create an OpenRouter API key in your own account.',
   },
   translation: {
     title: 'Translation',
-    body: 'Use General AI for the simplest setup. Configure a separate translation service only for a specialized model or provider. Structured output improves parsing; models such as Hunyuan-MT require plain output.',
+    body: 'Use General AI or connect a separate translation model with its endpoint, API key and model ID. Load the provider catalog or enter an ID manually. Plain text works with specialized translation models, including Hy-MT2; structured output is available under More options. Keys are sent only to the selected provider.',
   },
   speech: {
     title: 'Speech',
     body: 'Browser speech uses the browser recognition service. Cloud speech uploads recordings to your configured transcription endpoint. Local Whisper and SenseVoice models run in the browser runtime and may require a substantial first download.',
   },
+  config: { title: 'Import / Export', body: 'Transfer settings as a password-encrypted file or QR code. Exports include your API keys. Keep the file and password safe.' },
   image: {
     title: 'Images',
-    body: 'Local and Qwen OCR provide coordinate overlays. General AI and custom vision models extract text without overlays. Model IDs and endpoints remain your choice.',
+    body: 'Local and Qwen OCR support image overlays. Local models download on first use and run on this device. Jina OCR, General AI and custom vision return text. VLM translates a photo directly using an image-capable model. Show thinking displays the model reasoning when available.',
   },
 };
 
@@ -55,9 +64,16 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
     return loaded;
   });
   const [isSaving, setIsSaving] = useState(false);
-  const [showImportExport, setShowImportExport] = useState(false);
   const [showSettingsHelp, setShowSettingsHelp] = useState(false);
-  const [activeTab, setActiveTab] = useState(initialTab);
+  const [activeTab, setActiveTab] = useState<WebSettingsSection>(initialTab);
+  const [wideLayout, setWideLayout] = useState(() => window.matchMedia('(min-width: 700px)').matches);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  React.useEffect(() => {
+    const query = window.matchMedia('(min-width: 700px)');
+    const update = () => setWideLayout(query.matches);
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
 
   const [isCheckingLocalModel, setIsCheckingLocalModel] = useState(false);
   const [localModelStatus, setLocalModelStatus] = useState<{ ok: boolean; message: string } | null>(null);
@@ -80,18 +96,22 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
       setSettings(loaded);
       setActiveTab(initialTab);
       setShowSettingsHelp(false);
+      setSaveError(null);
     }
   }, [isOpen, initialTab]);
 
   const handleSave = () => {
+    if (isSaving) return;
     setIsSaving(true);
-    saveSettings(settings);
-    onSave(settings);
-
-    setTimeout(() => {
+    setSaveError(null);
+    try {
+      saveSettings(settings);
+      onSave(settings);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Could not save settings. Try again.');
+    } finally {
       setIsSaving(false);
-      // Don't call onClose here, parent handles closing after save
-    }, 300);
+    }
   };
 
   const handleImport = (importedSettings: AISettings) => {
@@ -125,281 +145,93 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200"
+      className="safe-modal fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200"
       {...backdropCloseHandlers}
     >
       <div
-        className="settings-dialog relative w-full max-w-md bg-white dark:bg-gray-800 rounded-3xl shadow-2xl animate-in zoom-in-95 duration-200"
+        role="dialog" aria-modal="true" aria-labelledby="settings-title"
+        className="settings-dialog relative w-full rounded-3xl shadow-2xl animate-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-indigo-500 rounded-xl cute-shadow">
-              <SettingsIcon className="w-5 h-5 text-white" />
-            </div>
-            <h2 className="text-base sm:text-xl font-bold text-gray-800 dark:text-white">
-              Settings
-            </h2>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setShowSettingsHelp(true)}
-              className="p-2 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-300 hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded-lg transition-all duration-200 btn-pop"
-              title={`About ${SETTINGS_HELP[activeTab].title}`}
-              aria-label={`About ${SETTINGS_HELP[activeTab].title}`}
-            >
-              <CircleHelp className="w-5 h-5" />
-            </button>
-            <button
-              onClick={() => setShowImportExport(true)}
-              className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded-lg transition-all duration-200 btn-pop"
-              title="Import/Export Settings"
-            >
-              <ArrowLeftRight className="w-5 h-5" />
-            </button>
-            <button
-              onClick={onClose}
-              aria-label="Close settings"
-              className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded-lg transition-all duration-200 btn-pop"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
+        <div className="settings-header">
+          <h2 id="settings-title">Settings</h2>
+          <button type="button" onClick={onClose} aria-label="Close settings" className="workspace-icon"><X size={20} /></button>
         </div>
 
-        {/* Content */}
-        <div className="settings-dialog-content p-6 max-h-[60vh] overflow-y-auto custom-scrollbar">
-          <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'general' | 'translation' | 'speech' | 'image')}>
-            <TabsList className="w-full grid grid-cols-4 mb-6">
-              <TabsTrigger value="general" className="flex flex-col items-center gap-1 px-2 py-2">
-                <SettingsIcon className="w-4 h-4" />
-                <span className="text-xs sm:text-sm">General</span>
-              </TabsTrigger>
-              <TabsTrigger value="translation" className="flex flex-col items-center gap-1 px-2 py-2">
-                <Languages className="w-4 h-4" />
-                <span className="text-xs sm:text-sm">Translate</span>
-              </TabsTrigger>
-              <TabsTrigger value="speech" className="flex flex-col items-center gap-1 px-2 py-2">
-                <Mic className="w-4 h-4" />
-                <span className="text-xs sm:text-sm">Speech</span>
-              </TabsTrigger>
-              <TabsTrigger value="image" className="flex flex-col items-center gap-1 px-2 py-2">
-                <ImageIcon className="w-4 h-4" />
-                <span className="text-xs sm:text-sm">Image</span>
-              </TabsTrigger>
-            </TabsList>
+        <Tabs className="settings-layout" value={activeTab} onValueChange={(value) => { setActiveTab(value as WebSettingsSection); setShowSettingsHelp(false); }}>
+          <TabsList className="settings-navigation" orientation={wideLayout ? 'vertical' : 'horizontal'} aria-label="Settings sections">
+            {WEB_SETTINGS_SECTIONS.map(({ id, label }) => {
+              const Icon = SETTINGS_ICONS[id];
+              return <TabsTrigger key={id} value={id} className="settings-tab"><Icon size={18} aria-hidden="true" /><span>{label}</span></TabsTrigger>;
+            })}
+          </TabsList>
+          <div key={activeTab} className="settings-dialog-content custom-scrollbar">
+            <div className="settings-panel-heading">
+              <h3>{SETTINGS_HELP[activeTab].title}</h3>
+              <button type="button" className="workspace-icon" aria-label={`About ${SETTINGS_HELP[activeTab].title}`} onClick={() => setShowSettingsHelp(true)}><CircleHelp size={18} /></button>
+            </div>
 
             {/* General AI Service Tab */}
             <TabsContent value="general">
               <div className="space-y-4">
-                <AIConnection value={settings.generalAI} onChange={(generalAI) => setSettings({ ...settings, generalAI })} />
-                {/* API Format */}
-                <div className="space-y-1.5">
-                  <label htmlFor="generalApiFormat" className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
-                    API Format
-                  </label>
-                  <Select
-                    value={settings.generalAI.apiFormat || DEFAULT_SETTINGS.generalAI.apiFormat}
-                    onValueChange={(value) => setSettings({
-                      ...settings,
-                      generalAI: {
-                        ...settings.generalAI,
-                        apiFormat: value as APIFormat,
-                      },
-                    })}
-                  >
-                    <SelectTrigger id="generalApiFormat">
-                      <SelectValue placeholder="Select API format" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {API_FORMAT_OPTIONS.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                <AIConnection value={settings.generalAI} onChange={(generalAI) => setSettings({ ...settings, generalAI })}>
 
-                {/* API Endpoint */}
-                <div className="space-y-1.5">
-                  <label htmlFor="generalEndpoint" className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
-                    API Endpoint
-                  </label>
-                  <input
-                    id="generalEndpoint"
-                    type="text"
-                    value={settings.generalAI.endpoint}
-                    onChange={(e) => setSettings({ ...settings, generalAI: { ...settings.generalAI, endpoint: e.target.value } })}
-                    placeholder="https://api.openai.com/v1"
-                    className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors"
-                  />
-                </div>
+                  {/* API Endpoint */}
+                  <div className="space-y-1.5">
+                    <label htmlFor="generalEndpoint" className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
+                      API Endpoint
+                    </label>
+                    <input
+                      id="generalEndpoint"
+                      type="text"
+                      value={settings.generalAI.endpoint}
+                      onChange={(e) => setSettings({ ...settings, generalAI: { ...settings.generalAI, endpoint: e.target.value } })}
+                      placeholder="https://api.openai.com/v1"
+                      className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors"
+                    />
+                  </div>
 
-                {/* Model Name */}
-                <div className="space-y-1.5">
-                  <label htmlFor="generalModel" className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
-                    Model Name
-                  </label>
-                  <input
-                    id="generalModel"
-                    type="text"
-                    value={settings.generalAI.modelName}
-                    onChange={(e) => setSettings({ ...settings, generalAI: { ...settings.generalAI, modelName: e.target.value } })}
-                    placeholder="Model ID"
-                    className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors"
-                  />
-                </div>
+                  {/* API Key */}
+                  <div className="space-y-1.5">
+                    <label htmlFor="generalApiKey" className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
+                      API Key
+                    </label>
+                    <input
+                      id="generalApiKey"
+                      type="password"
+                      value={settings.generalAI.apiKey}
+                      onChange={(e) => setSettings({ ...settings, generalAI: { ...settings.generalAI, apiKey: e.target.value } })}
+                      placeholder="sk-..."
+                      className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors"
+                    />
+                  </div>
 
-                {/* API Key */}
-                <div className="space-y-1.5">
-                  <label htmlFor="generalApiKey" className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
-                    API Key
-                  </label>
-                  <input
-                    id="generalApiKey"
-                    type="password"
-                    value={settings.generalAI.apiKey}
-                    onChange={(e) => setSettings({ ...settings, generalAI: { ...settings.generalAI, apiKey: e.target.value } })}
-                    placeholder="sk-..."
-                    className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors"
-                  />
-                </div>
-
-                {/* Info Box */}
-                <div className="p-3 bg-indigo-50 dark:bg-indigo-900/30 rounded-xl border border-indigo-200 dark:border-indigo-800">
-                  <p className="text-sm text-indigo-800 dark:text-indigo-200">
-                    <strong>Note:</strong> Your API key is stored locally and never sent to our servers.
-                    It's only used for direct communication with your chosen AI provider.
-                  </p>
-                </div>
+                  {/* Model Name */}
+                  <div className="space-y-1.5">
+                    <label htmlFor="generalModel" className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
+                      Model Name
+                    </label>
+                    <input
+                      id="generalModel"
+                      type="text"
+                      value={settings.generalAI.modelName}
+                      onChange={(e) => setSettings({ ...settings, generalAI: { ...settings.generalAI, modelName: e.target.value } })}
+                      placeholder="Model ID"
+                      className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors"
+                    />
+                  </div>
+                </AIConnection>
               </div>
             </TabsContent>
 
             {/* Translation Tab */}
             <TabsContent value="translation">
               <div className="space-y-4">
-                {/* Endpoint URL */}
-                <div className="space-y-1.5">
-                  <label htmlFor="endpoint" className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
-                    API Endpoint
-                  </label>
-                  <input
-                    id="endpoint"
-                    type="text"
-                    value={settings.endpoint}
-                    onChange={(e) => setSettings({ ...settings, endpoint: e.target.value })}
-                    placeholder="https://api.example.com/v1"
-                    className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors"
-                  />
+                <div className="settings-choice-grid" role="group" aria-label="Translation service">
+                  <button type="button" aria-pressed={!hasTranslationOverride(settings)} onClick={() => setSettings(clearTranslationOverride(settings))}>General AI</button>
+                  <button type="button" aria-pressed={hasTranslationOverride(settings)} onClick={() => setSettings({ ...settings, provider: 'custom' })}>Separate model</button>
                 </div>
-
-                {/* Model Name */}
-                <div className="space-y-1.5">
-                  <label htmlFor="model" className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
-                    Model Name
-                  </label>
-                  <input
-                    id="model"
-                    type="text"
-                    value={settings.modelName}
-                    onChange={(e) => setSettings({ ...settings, modelName: e.target.value })}
-                    placeholder="gpt-5"
-                    className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors"
-                  />
-                </div>
-
-                {/* API Key */}
-                <div className="space-y-1.5">
-                  <label htmlFor="apiKey" className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
-                    API Key
-                  </label>
-                  <input
-                    id="apiKey"
-                    type="password"
-                    value={settings.apiKey}
-                    onChange={(e) => setSettings({ ...settings, apiKey: e.target.value })}
-                    placeholder="sk-..."
-                    className="w-full px-3 py-2 text-sm rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-white focus:border-indigo-500 focus:outline-none transition-colors"
-                  />
-                </div>
-
-                {/* Output Mode Selection */}
-                {(() => {
-                  // Check if user is using general AI or a non-hunyuan-mt model
-                  const useTranslationService = !!(settings.apiKey && settings.endpoint && settings.modelName);
-                  const modelName = useTranslationService ? settings.modelName : settings.generalAI.modelName;
-                  const isHunyuanMT = modelName.toLowerCase().includes('hunyuan-mt');
-                  const canChooseOutputMode = !isHunyuanMT;
-
-                  return (
-                    <div className="space-y-2">
-                      <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
-                        Output Mode
-                      </label>
-                      <div className="grid grid-cols-2 gap-2">
-                        <button
-                          onClick={() => {
-                            if (canChooseOutputMode) {
-                              setSettings({ ...settings, translation: { ...settings.translation, outputMode: 'plain' } });
-                            }
-                          }}
-                          disabled={!canChooseOutputMode}
-                          className={`p-3 rounded-xl border-2 transition-all duration-200 ${
-                            settings.translation?.outputMode === 'plain'
-                              ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow'
-                              : canChooseOutputMode
-                              ? 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'
-                              : 'border-gray-200 dark:border-gray-700 opacity-50 cursor-not-allowed'
-                          }`}
-                        >
-                          <div className="text-sm font-bold text-gray-800 dark:text-white">Plain Text</div>
-                          <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Direct output</div>
-                        </button>
-                        <button
-                          onClick={() => {
-                            if (canChooseOutputMode) {
-                              setSettings({ ...settings, translation: { ...settings.translation, outputMode: 'structured' } });
-                            }
-                          }}
-                          disabled={!canChooseOutputMode}
-                          className={`p-3 rounded-xl border-2 transition-all duration-200 ${
-                            settings.translation?.outputMode === 'structured'
-                              ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow'
-                              : canChooseOutputMode
-                              ? 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'
-                              : 'border-gray-200 dark:border-gray-700 opacity-50 cursor-not-allowed'
-                          }`}
-                        >
-                          <div className="text-sm font-bold text-gray-800 dark:text-white">Structured</div>
-                          <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">JSON output</div>
-                        </button>
-                      </div>
-                      {isHunyuanMT && (
-                        <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
-                          Hunyuan-MT only supports plain text mode. Output mode is automatically set to plain.
-                        </p>
-                      )}
-                      {!isHunyuanMT && (
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                          <strong>Plain:</strong> Direct text output, more reliable for models with weak instruction following.
-                          <br />
-                          <strong>Structured:</strong> JSON output with better parsing, recommended for advanced models.
-                        </p>
-                      )}
-                    </div>
-                  );
-                })()}
-
-                {/* Info Box */}
-                <div className="p-3 bg-indigo-50 dark:bg-indigo-900/30 rounded-xl border border-indigo-200 dark:border-indigo-800">
-                  <p className="text-sm text-indigo-800 dark:text-indigo-200">
-                    <strong>Note:</strong> Your API key is stored locally and never sent to our servers.
-                    It's only used for direct communication with your chosen AI provider.
-                  </p>
-                </div>
+                {hasTranslationOverride(settings) && <TranslationConnection settings={settings} onChange={setSettings} />}
               </div>
             </TabsContent>
 
@@ -422,20 +254,20 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
                         className={`p-3 rounded-xl border-2 transition-all duration-200 ${settings.speechRecognition.provider === 'web-speech' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
                       >
                         <div className="text-sm font-bold text-gray-800 dark:text-white">Web Speech</div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Browser API</div>
+
                       </button>
                       <button
                         onClick={() => setSettings({
                           ...settings,
                           speechRecognition: {
                             ...settings.speechRecognition,
-                            provider: 'siliconflow'
+                            provider: 'openai-compatible'
                           }
                         })}
-                        className={`p-3 rounded-xl border-2 transition-all duration-200 ${settings.speechRecognition.provider === 'siliconflow' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
+                        className={`p-3 rounded-xl border-2 transition-all duration-200 ${settings.speechRecognition.provider === 'openai-compatible' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
                       >
                         <div className="text-sm font-bold text-gray-800 dark:text-white">AI Service</div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Cloud-based</div>
+
                       </button>
                       <button
                         onClick={() => setSettings({
@@ -450,12 +282,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
                         className={`p-3 rounded-xl border-2 transition-all duration-200 ${settings.speechRecognition.provider === 'local' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
                       >
                         <div className="text-sm font-bold text-gray-800 dark:text-white">Local Model</div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Offline</div>
+
                       </button>
                     </div>
                   </div>
 
-                  {settings.speechRecognition.provider === 'siliconflow' && (
+                  {settings.speechRecognition.provider === 'openai-compatible' && (
                     <>
 <div className="space-y-1.5">
                         <label htmlFor="speechEndpoint" className="block text-sm font-semibold text-gray-700 dark:text-gray-300">Speech endpoint</label>
@@ -729,9 +561,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
                         <label htmlFor="realtimeTranscription" className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
                           Enable Realtime Transcription
                         </label>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                          Transcribe audio in real-time using VAD (Voice Activity Detection)
-                        </p>
+
                       </div>
                       <Switch
                         id="realtimeTranscription"
@@ -748,17 +578,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
                   </div>
                 </div>
 
-                {/* Info Box */}
-                <div className="p-3 bg-indigo-50 dark:bg-indigo-900/30 rounded-xl border border-indigo-200 dark:border-indigo-800">
-                  <p className="text-sm text-indigo-800 dark:text-indigo-200">
-                    <strong>Web Speech:</strong> Uses your browser’s speech recognition. Availability and network requirements depend on the browser.
-                    <br />
-                    <strong>AI Service:</strong> Uses your selected compatible transcription API and model. Accuracy depends on the language and model.
-                    <br />
-                    <strong>Local Model:</strong> Runs sherpa-onnx Whisper or SenseVoice from a configured model directory URL.
-                  </p>
-                </div>
-              </div>
+</div>
             </TabsContent>
 
             {/* Image Tab */}
@@ -770,7 +590,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
                 {/* VLM Section */}
                 <div className="space-y-3 pt-3 border-t-2 border-gray-200 dark:border-gray-700">
                   <h3 className="text-sm font-bold text-gray-800 dark:text-white flex items-center gap-2">
-                    <Sparkles className="w-4 h-4" />
+                    <ImageIcon className="w-4 h-4" />
                     VLM Direct Translation
                   </h3>
                   <div className="space-y-2">
@@ -783,26 +603,26 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
                         className={`p-3 rounded-xl border-2 transition-all duration-200 ${settings.vlm.useGeneralAI ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
                       >
                         <div className="text-sm font-bold text-gray-800 dark:text-white">General AI</div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Use General</div>
+
                       </button>
                       <button
                         onClick={() => setSettings({ ...settings, vlm: { ...settings.vlm, useGeneralAI: false, useCustom: false } })}
                         className={`p-3 rounded-xl border-2 transition-all duration-200 ${!settings.vlm.useGeneralAI && !settings.vlm.useCustom ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
                       >
                         <div className="text-sm font-bold text-gray-800 dark:text-white">Use OCR</div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Same as OCR</div>
+
                       </button>
                       <button
                         onClick={() => setSettings({ ...settings, vlm: { ...settings.vlm, useGeneralAI: false, useCustom: true } })}
                         className={`p-3 rounded-xl border-2 transition-all duration-200 ${!settings.vlm.useGeneralAI && settings.vlm.useCustom ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
                       >
                         <div className="text-sm font-bold text-gray-800 dark:text-white">Custom</div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Custom VLM</div>
+
                       </button>
                     </div>
                   </div>
 
-                  {!settings.vlm.useGeneralAI && !settings.vlm.useCustom && <div className="ocr-settings"><strong>OCR settings used by VLM</strong><p>Custom vision reuses the selected OCR model. Qwen coordinate OCR uses its companion vision model. Local OCR requires a separate vision connection.</p><OCRSettings settings={settings} onChange={setSettings} /></div>}
+                  {!settings.vlm.useGeneralAI && !settings.vlm.useCustom && <div className="ocr-settings"><strong>OCR settings used by VLM</strong>{['local-ppocr', 'jina'].includes(settings.imageOCR.provider) && <p>Choose General AI or Custom for direct image translation.</p>}<OCRSettings settings={settings} onChange={setSettings} /></div>}
 
                   {!settings.vlm.useGeneralAI && settings.vlm.useCustom && (
                     <>
@@ -855,9 +675,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
                         <label htmlFor="thinkingMode" className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
                           Enable Thinking Mode
                         </label>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                          Show model's reasoning process in VLM translations
-                        </p>
+
                       </div>
                       <Switch
                         id="thinkingMode"
@@ -868,49 +686,25 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
                   </div>
                 </div>
 
-                {/* Info Box */}
-                <div className="p-3 bg-indigo-50 dark:bg-indigo-900/30 rounded-xl border border-indigo-200 dark:border-indigo-800">
-                  <p className="text-sm text-indigo-800 dark:text-indigo-200">
-                    <strong>OCR Mode:</strong> Recognizes text regions and overlays translations on image.
-                    <br />
-                    <strong>Local:</strong> Runs PP-OCRv6 Small in your browser. Models are downloaded on first use.
-                    <br />
-                    <strong>VLM Mode:</strong> Directly translates image content using vision models (text output only).
-                    <br />
-                    <strong>Tip:</strong> VLM defaults to General AI service. Configure it in the General tab.
-                  </p>
-                </div>
-              </div>
+</div>
             </TabsContent>
-          </Tabs>
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-end p-6 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 rounded-b-3xl">
-          <button
-            onClick={handleSave}
-            disabled={isSaving}
-            className="flex items-center gap-2 px-4 sm:px-6 py-2 sm:py-2.5 bg-indigo-500 text-white text-sm sm:text-base font-semibold rounded-xl cute-shadow hover:bg-indigo-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
-          >
-            <Save className="w-4 h-4" />
-            {isSaving ? 'Saving...' : 'Save Settings'}
-          </button>
+            <TabsContent value="config">
+              <Suspense fallback={<div role="status">Loading…</div>}>
+                <ImportExportDialog embedded isOpen onClose={() => setActiveTab('general')} currentSettings={settings} onImport={handleImport} />
+              </Suspense>
+            </TabsContent>
+          </div>
+        </Tabs>
+        {saveError && <p role="alert" className="settings-save-error">{saveError}</p>}
+        <div className="settings-footer">
+          <button type="button" onClick={onClose} className="workspace-secondary">Cancel</button>
+          <button type="button" onClick={handleSave} disabled={isSaving} aria-label="Save Settings" className="workspace-primary">{isSaving ? 'Saving…' : 'Save'}</button>
         </div>
       </div>
 
-      {/* Import/Export Dialog - Lazy Loaded */}
-      <Suspense fallback={null}>
-        <ImportExportDialog
-          isOpen={showImportExport}
-          onClose={() => setShowImportExport(false)}
-          currentSettings={settings}
-          onImport={handleImport}
-        />
-      </Suspense>
-
       {showSettingsHelp && (
         <div
-          className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/45"
+          className="safe-modal fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/45"
           onClick={() => setShowSettingsHelp(false)}
         >
           <div

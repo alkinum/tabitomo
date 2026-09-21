@@ -3,6 +3,8 @@ import path from 'node:path';
 import { deflateSync } from 'node:zlib';
 import {
   DEFAULT_SETTINGS,
+  JINA_OCR_ENDPOINT,
+  JINA_OCR_MODEL,
   annotateJapaneseFurigana,
   answerQuestionStream,
   collectAssistantStream,
@@ -74,7 +76,11 @@ const readTriplet = (prefix: string, aliases: string[] = []): ProviderTriplet | 
 
 const general = readTriplet('TABITOMO_GENERAL', ['TABITOMO_PROVIDER']);
 const translation = readTriplet('TABITOMO_TRANSLATION');
-const ocr = readTriplet('TABITOMO_OCR');
+const ocrProvider = env('TABITOMO_OCR_PROVIDER') || 'qwen';
+if (!['qwen', 'jina'].includes(ocrProvider)) throw new Error('TABITOMO_OCR_PROVIDER must be qwen or jina.');
+const ocr = ocrProvider === 'jina'
+  ? env('TABITOMO_OCR_API_KEY') ? { apiKey: env('TABITOMO_OCR_API_KEY'), endpoint: JINA_OCR_ENDPOINT, modelName: JINA_OCR_MODEL } : null
+  : readTriplet('TABITOMO_OCR');
 const vlm = readTriplet('TABITOMO_VLM');
 const speech = readTriplet('TABITOMO_SPEECH');
 
@@ -98,7 +104,7 @@ const settings: AISettings = normalizeSettings({
   },
   imageOCR: {
     ...DEFAULT_SETTINGS.imageOCR,
-    provider: ocr ? 'qwen' : DEFAULT_SETTINGS.imageOCR.provider,
+    provider: ocr ? ocrProvider as 'qwen' | 'jina' : DEFAULT_SETTINGS.imageOCR.provider,
     useGeneralAI: false,
     apiKey: ocr?.apiKey || '',
     endpoint: ocr?.endpoint || DEFAULT_SETTINGS.imageOCR.endpoint,
@@ -115,7 +121,7 @@ const settings: AISettings = normalizeSettings({
   },
   speechRecognition: {
     ...DEFAULT_SETTINGS.speechRecognition,
-    provider: speech ? 'siliconflow' : DEFAULT_SETTINGS.speechRecognition.provider,
+    provider: speech ? 'openai-compatible' : DEFAULT_SETTINGS.speechRecognition.provider,
     apiKey: speech?.apiKey || '',
     endpoint: speech?.endpoint || '',
     modelName: speech?.modelName || DEFAULT_SETTINGS.speechRecognition.modelName,
@@ -281,7 +287,7 @@ const main = async () => {
   results.push(await runStep(
     'ocr',
     hasOCRProvider,
-    'Set TABITOMO_OCR_API_KEY, TABITOMO_OCR_ENDPOINT, and TABITOMO_OCR_MODEL for Alibaba Cloud Model Studio Qwen-OCR.',
+    'For Jina, set TABITOMO_OCR_PROVIDER=jina and TABITOMO_OCR_API_KEY. For Qwen, set TABITOMO_OCR_API_KEY, TABITOMO_OCR_ENDPOINT, and TABITOMO_OCR_MODEL.',
     async (signal) => {
       const lines = await performOCR(cafePngDataUrl, settings, signal);
       if (!lines.length) {

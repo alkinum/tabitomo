@@ -1,0 +1,32 @@
+{
+  "core_tests": 56,
+  "typechecks": [
+    "shared-core",
+    "mobile"
+  ],
+  "parity_checks": 449,
+  "expo_web_smoke": "passed",
+  "web_layout_cases": 12,
+  "viewports": [
+    "390x844",
+    "320x720"
+  ],
+  "color_schemes": [
+    "light",
+    "dark"
+  ],
+  "contrast": {
+    "primary_white_label": 5.65,
+    "light_selected_text": 5.62,
+    "dark_selected_text": 6.37
+  },
+  "apple_sources": [
+    "https://developer.apple.com/design/human-interface-guidelines/buttons",
+    "https://developer.apple.com/design/human-interface-guidelines/layout",
+    "https://developer.apple.com/design/human-interface-guidelines/materials",
+    "https://developer.apple.com/design/human-interface-guidelines/accessibility"
+  ],
+  "native_release_build": "passed",
+  "native_visual_verification": "Blocked: fresh simulator installation succeeded on retry, but simctl launch timed out before rendering. Normal and large Dynamic Type visual acceptance remain unverified for this revision.",
+  "note": "Layout and provider behavior checks use synthetic data; no signed-device accessibility certification."
+}

@@ -26,7 +26,7 @@ const makeSettings = (patch: SettingsPatch = {}): AISettings => normalizeSetting
   },
   speechRecognition: {
     ...DEFAULT_SETTINGS.speechRecognition,
-    provider: 'siliconflow',
+    provider: 'openai-compatible',
     modelName: 'selected-asr',
     ...(patch.speechRecognition || {}),
   },
@@ -108,7 +108,7 @@ test('transcribeAudioFile posts OpenAI-compatible transcription form data', asyn
         apiKey: 'general-key',
       },
       speechRecognition: {
-        provider: 'siliconflow',
+        provider: 'openai-compatible',
         endpoint: 'https://speech.example.test/v1/',
         apiKey: 'speech-key',
         modelName: 'speech-model',

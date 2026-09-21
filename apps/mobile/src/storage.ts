@@ -209,10 +209,10 @@ export async function loadMobileSettingsSyncEnabled(): Promise<boolean> {
 }
 
 export async function setMobileSettingsSyncEnabled(enabled: boolean): Promise<void> {
-  mobileSettingsSyncEnabled = enabled;
   if (Platform.OS === 'ios') {
     await SecureStore.setItemAsync(SETTINGS_SYNC_ENABLED_KEY, enabled ? 'true' : 'false', secureStoreOptions);
   }
+  mobileSettingsSyncEnabled = enabled;
   if (enabled) {
     setSyncStatus('ready', 'iCloud sync is enabled and ready.');
   } else {

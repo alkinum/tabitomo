@@ -13,6 +13,7 @@ public final class TabitomoNativeSpeechModule: Module {
   private var recognizer: SFSpeechRecognizer?
   private var latestTranscript = ""
   private var isRecording = false
+  private var recognitionGeneration = 0
 
   public func definition() -> ModuleDefinition {
     Name("TabitomoNativeSpeech")
@@ -111,6 +112,8 @@ public final class TabitomoNativeSpeechModule: Module {
     }
 
     stopRecognition(cancel: true)
+    let generation = recognitionGeneration
+    speechRecognizer.queue = OperationQueue.main
 
     let engine = AVAudioEngine()
     let request = SFSpeechAudioBufferRecognitionRequest()
@@ -136,7 +139,7 @@ public final class TabitomoNativeSpeechModule: Module {
       audioEngine = engine
 
       recognitionTask = speechRecognizer.recognitionTask(with: request) { [weak self] result, error in
-        guard let self else {
+        guard let self, self.recognitionGeneration == generation else {
           return
         }
 
@@ -174,6 +177,9 @@ public final class TabitomoNativeSpeechModule: Module {
 
   @discardableResult
   private func stopRecognition(cancel: Bool) -> String {
+    // A completed/cancelled task can still deliver callbacks. It must never
+    // replace a newer transcript or stop the next recording session.
+    recognitionGeneration += 1
     if let engine = audioEngine {
       engine.stop()
       engine.inputNode.removeTap(onBus: 0)

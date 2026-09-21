@@ -21,16 +21,92 @@ const trimTrailingSlash = (value: string): string => value.replace(/\/+$/, '');
 
 const joinEndpoint = (endpoint: string, path: string): string => `${trimTrailingSlash(endpoint)}/${path.replace(/^\/+/, '')}`;
 
+type OpenAIProtocol = 'openai-chat' | 'openai-responses';
+// Capabilities can differ by model. Keep only short-lived, non-secret hints in memory.
+const protocolHints = new Map<string, { protocol: OpenAIProtocol; expires: number }>();
+
+const toResponsesInput = (messages: ProviderMessage[]): unknown[] => messages.map((message) => ({
+  role: message.role,
+  content: typeof message.content === 'string' ? message.content : message.content.map((part) => (
+    part.type === 'text'
+      ? { type: message.role === 'assistant' ? 'output_text' : 'input_text', text: part.text }
+      : { type: 'input_image', image_url: part.image_url.url, detail: 'auto' }
+  )),
+}));
+
+function isUnsupportedProtocol(status: number, body: string): boolean {
+  if (![400, 404, 405, 422, 501].includes(status)) return false;
+  if (/model_not_found|invalid_api_key|insufficient_quota|no endpoints found/i.test(body)) return false;
+  // A missing model, invalid key or exhausted balance is not a missing endpoint.
+  if (/model_not_found|invalid_api_key|insufficient_quota|\b(model|key|quota|credit|balance|billing|permission|access)\b/i.test(body)
+    && !/(only|must|does not|not supported|unsupported).{0,100}(responses|chat.?completions)|(responses|chat.?completions).{0,100}(not supported|unsupported)/i.test(body)) return false;
+  if ([404, 405, 501].includes(status)) return true;
+  return /(?:unsupported|not supported|unknown|unrecognized|not found|only supports?|must use|use instead).{0,100}(?:endpoint|route|responses|chat.?completions)|(?:endpoint|route|responses|chat.?completions).{0,100}(?:unsupported|not supported|not found|not available)/i.test(body);
+}
+
+function providerRequestError(status: number): Error {
+  const action = status === 401 || status === 403 ? 'Check your API key and model access.'
+    : status === 402 ? 'Check your provider balance.'
+    : status === 429 ? 'Rate limit or quota reached. Try again later.'
+    : status === 404 ? 'Check your endpoint and model ID.'
+    : 'Check your provider settings or try again later.';
+  // Provider error bodies may contain credentials or submitted content.
+  return new Error(`AI request failed (${status}). ${action}`);
+}
+
+async function requestOpenAI(
+  config: ProviderConfig, messages: ProviderMessage[], stream: boolean, signal?: AbortSignal,
+): Promise<Response> {
+  const endpoint = trimTrailingSlash(config.endpoint.trim());
+  const hintKey = JSON.stringify([endpoint, config.modelName]);
+  const hint = protocolHints.get(hintKey);
+  const preferred: OpenAIProtocol = config.apiFormat === 'openai-responses' ? 'openai-responses' : 'openai-chat';
+  const first = hint && hint.expires > Date.now() ? hint.protocol : preferred;
+  const protocols: OpenAIProtocol[] = [first, first === 'openai-chat' ? 'openai-responses' : 'openai-chat'];
+
+  for (const [index, protocol] of protocols.entries()) {
+    if (signal?.aborted) throw Object.assign(new Error('Request cancelled'), { name: 'AbortError' });
+    const response = await fetch(joinEndpoint(endpoint, protocol === 'openai-chat' ? 'chat/completions' : 'responses'), {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(config.apiKey.trim() ? { authorization: `Bearer ${config.apiKey.trim()}` } : {}),
+      },
+      body: JSON.stringify({
+        model: config.modelName,
+        ...(stream ? { stream: true } : {}),
+        ...(protocol === 'openai-chat' ? { messages } : { input: toResponsesInput(messages), store: false }),
+      }),
+      signal,
+    });
+    if (response.ok) {
+      if (protocolHints.size >= 100) protocolHints.clear();
+      protocolHints.set(hintKey, { protocol, expires: Date.now() + 10 * 60_000 });
+      return response;
+    }
+    const body = await response.text();
+    if (index === 0 && !signal?.aborted && isUnsupportedProtocol(response.status, body)) continue;
+    throw providerRequestError(response.status);
+  }
+  throw new Error('This provider does not support a compatible AI endpoint.');
+}
+
 const stripBoxTokens = (text: string): string => text
   .replace(/<\|begin_of_box\|>/g, '')
   .replace(/<\|end_of_box\|>/g, '');
 
 const parseOpenAIText = (payload: unknown): string => {
   const data = payload as {
+    error?: unknown;
+    status?: string;
     choices?: Array<{ message?: { content?: string | null }; text?: string | null }>;
     output_text?: string;
     output?: Array<{ content?: Array<{ text?: string; type?: string }> }>;
   };
+
+  if (data.error || data.status === 'failed' || data.status === 'incomplete') {
+    throw new Error('The provider could not complete the response. Try again.');
+  }
 
   if (typeof data.output_text === 'string') {
     return data.output_text;
@@ -182,9 +258,11 @@ const extractOpenAIStreamText = (payload: unknown): string => {
     output?: Array<{ content?: Array<{ text?: string; type?: string }> }>;
   };
 
-  if (typeof data.delta === 'string' && (!data.type || data.type.includes('.delta'))) {
+  if (typeof data.delta === 'string' && (!data.type || data.type === 'response.output_text.delta')) {
     return data.delta;
   }
+
+  if (data.type?.startsWith('response.')) return '';
 
   const choiceText = data.choices
     ?.map((choice) => choice.delta?.content ?? choice.delta?.text ?? choice.text ?? choice.message?.content ?? '')
@@ -253,6 +331,12 @@ async function* streamProviderResponseText(
     const payload = parseJsonPayload(event.data);
     if (!payload) {
       continue;
+    }
+
+    const status = payload as { type?: string; error?: unknown };
+    if (event.event === 'error' || status.error || ['error', 'response.failed', 'response.incomplete'].includes(status.type || '')) {
+      // Never replay a stream: some output may already have been delivered and billed.
+      throw new Error('The provider could not complete the response. Try again.');
     }
 
     const text = parseText(payload);
@@ -380,47 +464,7 @@ export async function generateProviderText(
     return parseAnthropicText(await response.json());
   }
 
-  if (config.apiFormat === 'openai-responses') {
-    const response = await fetch(joinEndpoint(config.endpoint, 'responses'), {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        ...(config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {}),
-      },
-      body: JSON.stringify({
-        model: config.modelName,
-        input: messages.map((message) => ({
-          role: message.role,
-          content: message.content,
-        })),
-      }),
-      signal: abortSignal,
-    });
-
-    if (!response.ok) {
-      throw new Error(`OpenAI Responses request failed: ${await response.text()}`);
-    }
-
-    return parseOpenAIText(await response.json());
-  }
-
-  const response = await fetch(joinEndpoint(config.endpoint, 'chat/completions'), {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      ...(config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {}),
-    },
-    body: JSON.stringify({
-      model: config.modelName,
-      messages,
-    }),
-    signal: abortSignal,
-  });
-
-  if (!response.ok) {
-    throw new Error(`OpenAI-compatible request failed: ${await response.text()}`);
-  }
-
+  const response = await requestOpenAI(config, messages, false, abortSignal);
   return parseOpenAIText(await response.json());
 }
 
@@ -470,49 +514,6 @@ export async function* generateProviderTextStream(
     return;
   }
 
-  if (config.apiFormat === 'openai-responses') {
-    const response = await fetch(joinEndpoint(config.endpoint, 'responses'), {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        ...(config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {}),
-      },
-      body: JSON.stringify({
-        model: config.modelName,
-        stream: true,
-        input: messages.map((message) => ({
-          role: message.role,
-          content: message.content,
-        })),
-      }),
-      signal: abortSignal,
-    });
-
-    if (!response.ok) {
-      throw new Error(`OpenAI Responses request failed: ${await response.text()}`);
-    }
-
-    yield* streamProviderResponseText(response, extractOpenAIStreamText, parseOpenAIText);
-    return;
-  }
-
-  const response = await fetch(joinEndpoint(config.endpoint, 'chat/completions'), {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      ...(config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {}),
-    },
-    body: JSON.stringify({
-      model: config.modelName,
-      messages,
-      stream: true,
-    }),
-    signal: abortSignal,
-  });
-
-  if (!response.ok) {
-    throw new Error(`OpenAI-compatible request failed: ${await response.text()}`);
-  }
-
+  const response = await requestOpenAI(config, messages, true, abortSignal);
   yield* streamProviderResponseText(response, extractOpenAIStreamText, parseOpenAIText);
 }

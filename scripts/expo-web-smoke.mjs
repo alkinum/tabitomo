@@ -1,9 +1,11 @@
+import { reviewTranslationModels } from './translation-model-mobile-smoke.mjs';
 import { createServer } from 'node:http';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { chromium } from 'playwright';
+import { reviewMobileInteractions } from './mobile-interaction-review.mjs';
 
 const rootDir = path.resolve(new URL('..', import.meta.url).pathname);
 const outDir = await mkdtemp(path.join(tmpdir(), 'tabitomo-expo-web-'));
@@ -83,8 +85,8 @@ const createEncryptedConfigPayload = () => {
         },
         speechRecognition: {
           ...DEFAULT_SETTINGS.speechRecognition,
-          provider: 'siliconflow',
-          modelName: 'TeleAI/TeleSpeechASR',
+          provider: 'openai-compatible',
+          modelName: 'mock-transcription-model',
           apiKey: 'speech-import-key',
         },
         imageOCR: {
@@ -187,13 +189,14 @@ try {
   browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   const runtimeErrors = [];
+  const expectedHTTPFailures = new Set();
   const providerRequests = [];
 
   page.on('pageerror', (error) => {
     runtimeErrors.push(`pageerror: ${error.message}`);
   });
   page.on('console', (message) => {
-    if (message.type() === 'error') {
+    if (message.type() === 'error' && !expectedHTTPFailures.has(message.location().url)) {
       runtimeErrors.push(`console error: ${message.text()}`);
     }
   });
@@ -341,7 +344,7 @@ try {
 
   await page.getByText('Manual setup').click();
   await page.getByText('Translation service', { exact: true }).waitFor({ state: 'visible' });
-  await page.getByRole('button', { name: 'OpenAI Chat' }).waitFor({ state: 'visible' });
+  if (await page.getByText('OpenAI Chat', { exact: true }).count()) throw new Error('Legacy protocol picker remains.');
   await page.getByPlaceholder('https://api.openai.com/v1').waitFor({ state: 'visible' });
   await page.getByPlaceholder('sk-...').first().waitFor({ state: 'visible' });
 
@@ -394,7 +397,9 @@ try {
 
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByPlaceholder('https://api.openai.com/v1').waitFor({ state: 'visible' });
-  await page.getByText('Translation override', { exact: true }).waitFor({ state: 'visible' });
+  await page.getByRole('tab', { name: 'Translate settings' }).click();
+  await page.getByText('Translation model', { exact: true }).waitFor({ state: 'visible' });
+  await page.getByRole('tab', { name: 'AI settings' }).click();
 
   await page.getByPlaceholder('https://api.openai.com/v1').fill(mockProviderEndpoint);
   await page.getByPlaceholder('Model ID', { exact: true }).fill('tabitomo-smoke-model');
@@ -407,6 +412,8 @@ try {
   await page.getByText('Image OCR', { exact: true }).waitFor({ state: 'visible' });
   await page.getByText('VLM image translation', { exact: true }).waitFor({ state: 'visible' });
   await page.getByRole('button', { name: 'Alibaba Qwen-OCR' }).click();
+  if (await page.getByRole('textbox', { name: 'OCR model', exact: true }).count()) throw new Error('Qwen advanced fields should start collapsed.');
+  await page.getByRole('button', { name: 'More options', exact: true }).click();
   await page.getByPlaceholder(/dashscope-intl\.aliyuncs\.com/).fill(mockOCRProviderEndpoint);
   await page.getByPlaceholder('DashScope API key').fill('sk-tabitomo-ocr-smoke');
   await page.getByRole('button', { name: 'OCR settings' }).click();
@@ -422,9 +429,11 @@ try {
   await page.getByRole('button', { name: 'Download SenseVoice Small' }).waitFor({ state: 'visible' });
   await page.getByRole('button', { name: 'Download PP-OCR v6 Small' }).waitFor({ state: 'visible' });
 
-  await page.getByRole('tab', { name: 'Config settings' }).click();
+  await page.getByRole('tab', { name: 'Data settings' }).click();
   await page.getByText('Import / Export', { exact: true }).waitFor({ state: 'visible' });
 
+  await page.getByRole('tab', { name: 'AI settings' }).click();
+  if (await page.getByPlaceholder('Model ID', { exact: true }).inputValue() !== 'tabitomo-smoke-model') throw new Error('Switching sections discarded the AI draft.');
   await page.getByRole('button', { name: 'Save settings' }).click();
   await page.getByText('Settings saved securely on this device.').waitFor({ state: 'visible' });
   await page.reload({ waitUntil: 'networkidle' });
@@ -445,7 +454,7 @@ try {
     throw new Error('Settings did not persist across Expo web reload.');
   }
 
-  await page.getByRole('tab', { name: 'Config settings' }).click();
+  await page.getByRole('tab', { name: 'Data settings' }).click();
   await page.getByPlaceholder('Required for export/import').fill('tabitomo-export-password');
   await page.getByRole('button', { name: 'Export', exact: true }).click();
   await page.getByText('Encrypted .ttconfig payload copied. QR is ready below.').waitFor({ state: 'visible' });
@@ -459,7 +468,7 @@ try {
   await page.getByPlaceholder('https://api.openai.com/v1').fill('https://changed.example.test/v1');
   await page.getByPlaceholder('Model ID', { exact: true }).fill('changed-model');
   await page.getByPlaceholder('sk-...').fill('sk-changed');
-  await page.getByRole('tab', { name: 'Config settings' }).click();
+  await page.getByRole('tab', { name: 'Data settings' }).click();
   await page.getByLabel('Encrypted config payload').fill(exportedSettingsPayload);
   await page.getByRole('button', { name: 'Import pasted payload' }).click();
   await page.getByPlaceholder('https://api.openai.com/v1').waitFor({ state: 'detached' });
@@ -555,7 +564,48 @@ try {
   await page.getByRole('button', { name: 'Clear', exact: true }).click();
 
   const screenshots = path.join(rootDir, 'output/playwright');
+  const reviewErrorStart = runtimeErrors.length;
+  await reviewMobileInteractions(page, { endpoint: mockProviderEndpoint, imagePath: smokeImagePath });
+  // Chromium logs our deliberate HTTP 503 recovery fixture as a resource error.
+  // Consume only that one expected error; preserve every other runtime error.
+  const expectedFailure = runtimeErrors.findIndex((message, index) => index >= reviewErrorStart && message === 'console error: Failed to load resource: the server responded with a status of 503 (Service Unavailable)');
+  if (expectedFailure >= 0) runtimeErrors.splice(expectedFailure, 1);
   await mkdir(screenshots, { recursive: true });
+  // Jina needs only a key; use the official route with a synthetic response.
+  let jinaRequests = 0;
+  await page.route('https://api.jina.ai/v1/chat/completions', (route) => {
+    const request = route.request();
+    const body = request.postDataJSON();
+    if (body.model !== 'jina-ocr-v1' || !body.messages[0].content[1].image_url.url.startsWith('data:image/')) throw new Error('Invalid Jina image request.');
+    if (request.headers().authorization !== 'Bearer jina-smoke-key') throw new Error('Jina used the wrong credential.');
+    jinaRequests++;
+    return route.fulfill({ headers: corsHeaders, json: { choices: [{ message: { content: mockOCRText } }] } });
+  });
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('tab', { name: 'Image settings' }).click();
+  await page.getByRole('button', { name: 'General AI', exact: true }).nth(1).click();
+  await page.getByText('OCR settings used by VLM', { exact: true }).waitFor({ state: 'detached' });
+  await page.getByRole('button', { name: 'Jina OCR', exact: true }).click();
+  await page.getByLabel('Jina API key', { exact: true }).fill('jina-smoke-key');
+  if (await page.getByRole('textbox', { name: 'OCR model', exact: true }).count()) throw new Error('Jina should not expose a model field.');
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: width === 320 ? 720 : 844 });
+    if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)) throw new Error('Jina settings overflow.');
+    await page.screenshot({ path: path.join(screenshots, `expo-jina-${width}.png`), fullPage: true });
+  }
+  await page.getByRole('button', { name: 'Save settings' }).click();
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('tab', { name: 'Image settings' }).click();
+  if (await page.getByLabel('Jina API key', { exact: true }).inputValue() !== 'jina-smoke-key') throw new Error('Jina settings did not persist.');
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  const jinaChooser = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: 'Album' }).click();
+  await (await jinaChooser).setFiles(smokeImagePath);
+  await page.getByRole('button', { name: 'OCR text image mode', exact: true }).click();
+  await page.getByText(mockOCRTranslation).first().waitFor({ state: 'visible' });
+  if (!jinaRequests) throw new Error('Jina OCR did not run.');
+  await page.getByRole('button', { name: 'Clear', exact: true }).click();
   for (const width of [390, 320]) {
     await page.setViewportSize({ width, height: width === 320 ? 720 : 844 });
     for (const colorScheme of ['light', 'dark']) {
@@ -591,29 +641,88 @@ try {
   await page.getByRole('tab', { name: 'AI settings' }).click();
   await page.getByRole('button', { name: 'Choose AI provider', exact: true }).waitFor({ state: 'visible' });
   await page.screenshot({ path: path.join(screenshots, 'expo-settings-320-light.png'), fullPage: true });
-  await page.context().route('https://openrouter.ai/auth?**', (route) => route.fulfill({ body: 'Mock authorization page' }));
-  let authExchanges = 0;
-  await page.route('https://openrouter.ai/api/v1/auth/keys', (route) => {
-    authExchanges++;
-    const body = route.request().postDataJSON();
-    if (body.code !== 'one-time-code' || !/^[A-Za-z0-9_-]{43}$/.test(body.code_verifier)) throw new Error('Invalid PKCE exchange.');
-    return route.fulfill({ json: { key: 'mock-authorized-key' } });
-  });
-  await page.route('https://openrouter.ai/api/v1/models', (route) => route.fulfill({ json: { data: [
+  await page.route('https://openrouter.ai/api/v1/models', (route) => {
+    if (route.request().headers().authorization !== 'Bearer mock-direct-key') throw new Error('Direct API key was not sent.');
+    return route.fulfill({ json: { data: [
     { id: 'vendor/vision', name: 'Travel Vision', architecture: { input_modalities: ['text', 'image'] } },
     { id: 'vendor/text', name: 'Travel Text', architecture: { input_modalities: ['text'] } },
-  ] } }));
-  await page.getByRole('button', { name: 'Connect with OpenRouter' }).click();
-  await page.getByLabel('Authorization code').fill('one-time-code');
-  await page.getByRole('button', { name: 'Finish connection' }).click();
-  await page.getByText('Connected. Load models to choose one, then save your settings.').waitFor({ state: 'visible' });
-  if (authExchanges !== 1) throw new Error('Missing OpenRouter exchange.');
+  ] } }); });
+  await page.getByRole('button', { name: 'Choose AI provider', exact: true }).click();
+  await page.getByRole('button', { name: 'OpenRouter', exact: true }).click();
+  await page.getByPlaceholder('sk-...').fill('mock-direct-key');
+  if (await page.getByText('OpenAI Chat', { exact: true }).count() || await page.getByRole('button', { name: 'Connect with OpenRouter' }).count()) throw new Error('Legacy connection controls remain.');
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: width === 320 ? 720 : 844 });
+    for (const colorScheme of ['light', 'dark']) {
+      await page.emulateMedia({ colorScheme });
+      await page.getByRole('button', { name: 'Choose AI provider', exact: true }).scrollIntoViewIfNeeded();
+      if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)) throw new Error('Connection form overflow.');
+      await page.screenshot({ path: path.join(screenshots, `expo-connection-form-${width}-${colorScheme}.png`), fullPage: true });
+      const tabBar = page.getByRole('tablist', { name: 'Settings sections' });
+      const navY = (await tabBar.boundingBox()).y;
+      const saveY = (await page.getByRole('button', { name: 'Save settings' }).boundingBox()).y;
+      for (const label of ['Translate', 'Image', 'Data']) {
+        const tab = page.getByRole('tab', { name: `${label} settings` });
+        await tab.click();
+        await page.getByRole('tab', { name: `${label} settings`, selected: true }).waitFor({ state: 'visible' });
+        await page.waitForFunction((name) => { const tab = document.querySelector(`[role="tab"][aria-label="${name}"]`); const bounds = tab?.getBoundingClientRect(); return bounds && bounds.x >= 0 && bounds.right <= innerWidth + 1; }, `${label} settings`);
+        const bounds = await tab.boundingBox();
+        if (bounds.x < 0 || bounds.x + bounds.width > width + 1) throw new Error(`${label} tab was not revealed.`);
+        if (label === 'Image' || label === 'Data') {
+          const toggleLabel = label === 'Image' ? 'Show thinking' : 'Sync settings with iCloud';
+          const control = page.getByRole('switch', { name: toggleLabel });
+          await control.scrollIntoViewIfNeeded();
+          const geometry = await control.evaluate((element) => {
+            const widget = element.parentElement.getBoundingClientRect();
+            const row = element.parentElement.parentElement.getBoundingClientRect();
+            return { centerOffset: Math.abs(widget.y + widget.height / 2 - row.y - row.height / 2), inside: widget.x >= row.x && widget.right <= row.right };
+          });
+          if (geometry.centerOffset > 1 || !geometry.inside) throw new Error(`${toggleLabel} is not centered inside its settings row.`);
+          if (label === 'Image') {
+            const checked = await control.isChecked();
+            await control.click();
+            if (await control.isChecked() === checked) throw new Error('Show thinking switch did not change.');
+            await control.click();
+          }
+        }
+        await page.screenshot({ path: path.join(screenshots, `expo-settings-${label.toLowerCase()}-${width}-${colorScheme}.png`), fullPage: true });
+      }
+      await page.getByLabel('Encrypted config payload').scrollIntoViewIfNeeded();
+      if (Math.abs((await tabBar.boundingBox()).y - navY) > 1) throw new Error('Settings navigation scrolled with form content.');
+      if (Math.abs((await page.getByRole('button', { name: 'Save settings' }).boundingBox()).y - saveY) > 1) throw new Error('Save button scrolled with form content.');
+      await page.getByRole('tab', { name: 'AI settings' }).click();
+      if (await page.getByPlaceholder('sk-...').inputValue() !== 'mock-direct-key') throw new Error('Category switching lost draft credentials.');
+    }
+  }
+  await page.emulateMedia({ colorScheme: 'light' });
   await page.getByRole('button', { name: 'Load available models' }).click();
   await page.getByRole('checkbox', { name: 'Image-capable models' }).click();
   await page.getByRole('button', { name: /Travel Vision/ }).click();
   if (await page.getByPlaceholder('Model ID', { exact: true }).inputValue() !== 'vendor/vision') throw new Error('Model discovery selection was lost.');
   if (await page.getByRole('button', { name: /Travel Text/ }).count()) throw new Error('Vision filter failed.');
   await page.screenshot({ path: path.join(screenshots, 'expo-connection-320.png'), fullPage: true });
+  await page.getByRole('button', { name: 'Save settings' }).click();
+  await page.reload({ waitUntil: 'networkidle' });
+  let chatCalls = 0;
+  let responsesCalls = 0;
+  expectedHTTPFailures.add('https://openrouter.ai/api/v1/chat/completions');
+  await page.route('https://openrouter.ai/api/v1/chat/completions', (route) => {
+    chatCalls++;
+    return route.fulfill({ status: 404, json: { error: { message: 'Unknown endpoint' } } });
+  });
+  await page.route('https://openrouter.ai/api/v1/responses', (route) => {
+    responsesCalls++;
+    if (route.request().headers().authorization !== 'Bearer mock-direct-key' || !route.request().postDataJSON().input) throw new Error('Invalid Responses fallback.');
+    return route.fulfill({ contentType: 'text/event-stream', body: 'data: {"type":"response.output_text.delta","delta":"Automatic connection works."}\n\ndata: {"type":"response.completed"}\n\n' });
+  });
+  await page.getByRole('tab', { name: 'Explain text mode' }).click();
+  await page.getByLabel('Source text').fill('駅');
+  await page.getByRole('button', { name: 'Explain', exact: true }).click();
+  await page.getByText('Automatic connection works.', { exact: true }).waitFor({ state: 'visible' });
+  if (chatCalls !== 1 || responsesCalls !== 1) throw new Error('Automatic protocol negotiation did not run exactly once.');
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('tab', { name: 'AI settings' }).click();
+  if (await page.getByPlaceholder('sk-...').inputValue() !== 'mock-direct-key') throw new Error('API key was not persisted.');
   await page.getByRole('button', { name: 'Choose AI provider', exact: true }).click();
   await page.screenshot({ path: path.join(screenshots, 'expo-providers-320-light.png'), fullPage: true });
   await page.getByRole('button', { name: 'Local server', exact: true }).click();
@@ -622,11 +731,20 @@ try {
   if (await page.getByPlaceholder('sk-...').inputValue()) throw new Error('Provider switch retained credentials.');
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
 
+  await reviewTranslationModels(page, rootDir, expectedHTTPFailures);
+
   if (runtimeErrors.length) {
     throw new Error(`Expo web smoke found runtime errors:\n${runtimeErrors.join('\n')}`);
   }
 
   console.log('Expo web smoke passed.');
+} catch (error) {
+  const page = browser?.contexts()[0]?.pages()[0];
+  if (page) {
+    await mkdir(path.join(rootDir, 'output/mobile-review'), { recursive: true });
+    await page.screenshot({ path: path.join(rootDir, 'output/mobile-review/smoke-failure.png') }).catch(() => {});
+  }
+  throw error;
 } finally {
   if (browser) {
     await browser.close();

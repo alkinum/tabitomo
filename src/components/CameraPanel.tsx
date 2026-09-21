@@ -115,7 +115,7 @@ export const CameraPanel: React.FC<CameraPanelProps> = ({ isOpen, onClose, onCap
   return (
     <div className="fixed inset-0 z-50 bg-black flex flex-col">
       {/* Header */}
-      <div className="absolute top-0 left-0 right-0 z-10 p-4 bg-gradient-to-b from-black/60 to-transparent">
+      <div className="safe-camera-header absolute top-0 left-0 right-0 z-10 p-4 bg-gradient-to-b from-black/60 to-transparent">
         <div className="flex items-center justify-between">
           <button
             onClick={handleClose}
@@ -156,7 +156,7 @@ export const CameraPanel: React.FC<CameraPanelProps> = ({ isOpen, onClose, onCap
       </div>
 
       {/* Bottom Controls */}
-      <div className="absolute bottom-0 left-0 right-0 z-10 p-8 bg-gradient-to-t from-black/60 to-transparent">
+      <div className="safe-camera-footer absolute bottom-0 left-0 right-0 z-10 p-8 bg-gradient-to-t from-black/60 to-transparent">
         <div className="flex items-center justify-center">
           <button
             onClick={handleCapture}

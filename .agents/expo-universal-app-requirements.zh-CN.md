@@ -1,10 +1,18 @@
 # tabitomo Expo Universal App 需求跟进文档
 
+## 2026-09-20 Safe Area 修正
+
+主页面、设置等原生弹层、全屏预览分别处理系统安全区，sheet 键盘避让改用 UIKit 屏幕坐标。Web 同步保护固定弹窗、相机控制和通知；共享配置与 provider 契约不变。旧截图遗漏了状态栏重叠，安全区验收以 [当前修正记录](safe-area-review-2026-09-20.md) 为准。
+
+## 2026-09-20 移除旧版 HY-MT 与 SiliconFlow
+
+已删除旧版翻译模型的专用 prompt、强制 plain、删尾处理及原生测试场景；删除 SiliconFlow 的 AI/翻译/语音预设。语音统一使用 `openai-compatible`，旧枚举仅在导入边界迁移。Hy-MT2 与通用 API 配置保留。此决策替代下文历史记录中的旧接入说明，详见 [当前接入契约](translation-models.zh-CN.md)。
+
 ## 2026-09-08 design and provider revision
 
-Web and Expo now consume shared light/dark indigo tokens and shared settings normalization. Desktop uses two columns; phone uses native stacked panels. Settings and onboarding include OpenRouter browser authorization with pasted one-time code (PKCE, no callback URL), explicit live model discovery, editable model IDs, and direct completion after AI setup. OCR supports local geometry, General AI text extraction, custom compatible vision text extraction, and the existing explicit Qwen coordinate adapter. ASR accepts arbitrary compatible endpoints; blank model IDs no longer choose TeleAI, and credentials are reused only for the same base URL. Local-network model endpoints may omit a key. There is no bundled native VLM runtime or new claim of on-device benchmark superiority.
+Web and Expo now consume shared light/dark indigo tokens and shared settings normalization. Desktop uses two columns; phone uses native stacked panels. Settings and onboarding use directly entered OpenRouter API keys, explicit live model discovery, editable model IDs, and direct completion after AI setup. OCR supports local geometry, General AI text extraction, custom compatible vision text extraction, and the existing explicit Qwen coordinate adapter. ASR accepts arbitrary compatible endpoints; blank model IDs no longer choose TeleAI, and credentials are reused only for the same base URL. Local-network model endpoints may omit a key. There is no bundled native VLM runtime or new claim of on-device benchmark superiority.
 
-This supersedes older ledger statements that cloud OCR only accepts Qwen, or that General AI/custom OCR is unavailable. Existing Qwen configs and the legacy `siliconflow` ASR enum remain import-compatible. See [design and model decisions](design-and-model-revision.zh-CN.md) for architecture, candidates, official sources and verification limits. Signed-device account/permissions/CloudKit/model quality checks remain required.
+This supersedes older ledger statements that cloud OCR only accepts Qwen, or that General AI/custom OCR is unavailable. Existing Qwen configs remain import-compatible; old ASR IDs migrate to `openai-compatible` at import. See [design and model decisions](design-and-model-revision.zh-CN.md) for architecture, candidates, official sources and verification limits. Signed-device account/permissions/CloudKit/model quality checks remain required.
 
 
 状态：实现中

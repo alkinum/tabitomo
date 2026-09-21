@@ -26,14 +26,8 @@ export interface GeneralAIPreset {
   models: ModelOption[];
 }
 
-export interface TranslationProviderPreset {
-  id: string;
-  label: string;
-  description: string;
-  endpoint: string;
-  defaultModel: string;
+export interface TranslationProviderPreset extends GeneralAIPreset {
   outputMode?: AISettings['translation']['outputMode'];
-  models: ModelOption[];
 }
 
 export interface SpeechProviderPreset {
@@ -67,12 +61,11 @@ export interface VLMPreset {
   models?: ModelOption[];
 }
 
-export const SILICONFLOW_ENDPOINT = 'https://api.siliconflow.cn/v1';
 export const ANTHROPIC_ENDPOINT = 'https://api.anthropic.com/v1';
 
 export const GENERAL_AI_PRESETS: readonly GeneralAIPreset[] = [
   {
-    id: 'openrouter', label: 'OpenRouter', description: 'Connect your account and choose from the live model catalog.',
+    id: 'openrouter', label: 'OpenRouter', description: 'Enter your API key and choose from the live model catalog.',
     endpoint: 'https://openrouter.ai/api/v1', apiFormat: 'openai-chat', defaultModel: '', models: [],
   },
   {
@@ -81,20 +74,11 @@ export const GENERAL_AI_PRESETS: readonly GeneralAIPreset[] = [
   },
 
   {
-    id: 'openai-responses',
-    label: 'OpenAI Responses',
-    description: 'OpenAI Responses API; choose an available model from your account.',
+    id: 'openai',
+    label: 'OpenAI',
+    description: 'Choose an available model from your account.',
     endpoint: OPENAI_ENDPOINT,
     apiFormat: 'openai-responses',
-    defaultModel: '',
-    models: [],
-  },
-  {
-    id: 'openai-chat',
-    label: 'OpenAI Chat',
-    description: 'OpenAI-compatible chat completions for broad provider support.',
-    endpoint: OPENAI_ENDPOINT,
-    apiFormat: 'openai-chat',
     defaultModel: '',
     models: [],
   },
@@ -116,46 +100,12 @@ export const GENERAL_AI_PRESETS: readonly GeneralAIPreset[] = [
     defaultModel: '',
     models: [],
   },
-  {
-    id: 'siliconflow',
-    label: 'SiliconFlow',
-    description: 'OpenAI-compatible hosted models used by the web app presets.',
-    endpoint: SILICONFLOW_ENDPOINT,
-    apiFormat: 'openai-chat',
-    defaultModel: '',
-    models: [],
-  },
 ] as const;
 
-export const TRANSLATION_PROVIDER_PRESETS: readonly TranslationProviderPreset[] = [
-  {
-    id: 'siliconflow-hunyuan-mt',
-    label: 'SiliconFlow Hunyuan-MT',
-    description: 'Specialized translation model already supported by the web app.',
-    endpoint: SILICONFLOW_ENDPOINT,
-    defaultModel: 'tencent/Hunyuan-MT-7B',
-    outputMode: 'plain',
-    models: [],
-  },
-  {
-    id: 'openai-translation',
-    label: 'OpenAI',
-    description: 'Use OpenAI-compatible text models for translation override.',
-    endpoint: OPENAI_ENDPOINT,
-    defaultModel: '',
-    outputMode: 'structured',
-    models: [],
-  },
-  {
-    id: 'dashscope-qwen-translation',
-    label: 'DashScope Qwen',
-    description: 'Qwen text models through OpenAI-compatible API.',
-    endpoint: DASHSCOPE_ENDPOINT,
-    defaultModel: '',
-    outputMode: 'structured',
-    models: [],
-  },
-] as const;
+/** Translation overrides use compatible APIs and a live catalog, never a pinned model. */
+export const TRANSLATION_PROVIDER_PRESETS: readonly TranslationProviderPreset[] = GENERAL_AI_PRESETS
+  .filter((preset) => preset.apiFormat !== 'anthropic')
+  .map((preset) => ({ ...preset, apiFormat: 'openai-chat', outputMode: 'plain' }));
 
 export const SPEECH_PROVIDER_PRESETS: readonly SpeechProviderPreset[] = [
   {
@@ -165,21 +115,10 @@ export const SPEECH_PROVIDER_PRESETS: readonly SpeechProviderPreset[] = [
     provider: 'web-speech',
   },
   {
-    id: 'siliconflow-teleai',
-    label: 'SiliconFlow TeleAI',
-    description: 'OpenAI-compatible cloud transcription used by the web app.',
-    provider: 'siliconflow',
-    endpoint: SILICONFLOW_ENDPOINT,
-    defaultModel: 'TeleAI/TeleSpeechASR',
-    models: [
-      { id: 'TeleAI/TeleSpeechASR', label: 'TeleSpeech ASR' },
-    ],
-  },
-  {
     id: 'openai-transcribe',
     label: 'OpenAI transcription',
     description: 'OpenAI-compatible audio transcription endpoint.',
-    provider: 'siliconflow',
+    provider: 'openai-compatible',
     endpoint: OPENAI_ENDPOINT,
     defaultModel: 'gpt-4o-mini-transcribe',
     models: [
@@ -273,7 +212,7 @@ const findById = <T extends { id: string }>(items: readonly T[], id: string): T 
 );
 
 export function applyGeneralAIPreset(settings: AISettings, presetId: string): AISettings {
-  const preset = findById(GENERAL_AI_PRESETS, presetId);
+  const preset = findById(GENERAL_AI_PRESETS, ['openai-chat', 'openai-responses'].includes(presetId) ? 'openai' : presetId);
   if (!preset) return settings;
 
   return {
@@ -392,15 +331,14 @@ export function applyVLMPreset(settings: AISettings, presetId: string): AISettin
 
 export function matchGeneralAIPreset(settings: AISettings): string | undefined {
   return GENERAL_AI_PRESETS.find((preset) => (
-    preset.apiFormat === settings.generalAI.apiFormat
-    && preset.endpoint === settings.generalAI.endpoint
+    preset.endpoint.replace(/\/+$/, '') === settings.generalAI.endpoint.trim().replace(/\/+$/, '')
   ))?.id;
 }
 
 export function matchTranslationProviderPreset(settings: AISettings): string | undefined {
   if (!settings.endpoint && !settings.modelName && !settings.apiKey) return 'general-ai';
   return TRANSLATION_PROVIDER_PRESETS.find((preset) => (
-    preset.endpoint === settings.endpoint && preset.defaultModel === settings.modelName
+    preset.endpoint.replace(/\/+$/, '') === settings.endpoint.trim().replace(/\/+$/, '')
   ))?.id;
 }
 

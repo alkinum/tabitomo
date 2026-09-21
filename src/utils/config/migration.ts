@@ -4,25 +4,17 @@
  */
 
 import { AIConfigV1, CURRENT_SCHEMA_VERSION } from './configSchema';
+import { normalizeSpeechRecognitionProvider } from '../../../packages/tabitomo-core/src/settings';
 
 /**
  * Unknown record type for untyped data
  */
 type UnknownRecord = Record<string, unknown>;
 
-type SpeechProvider = 'web-speech' | 'siliconflow' | 'local';
 type LocalAsrEngine = 'whisper' | 'sensevoice';
 type LocalVadMode = 'silero' | 'energy' | 'off';
 type SenseVoiceLanguage = 'auto' | 'zh' | 'en' | 'ja' | 'ko' | 'yue';
 type WhisperTask = 'transcribe' | 'translate';
-
-const normalizeSpeechProvider = (provider: unknown): SpeechProvider => {
-  if (provider === 'local-whisper') return 'local';
-  if (provider === 'web-speech' || provider === 'siliconflow' || provider === 'local') {
-    return provider;
-  }
-  return 'web-speech';
-};
 
 const normalizeEnum = <T extends string>(value: unknown, values: readonly T[], fallback: T): T => (
   values.includes(value as T) ? value as T : fallback
@@ -32,7 +24,7 @@ const normalizeSpeechRecognitionConfig = (speechRecognition: unknown): AIConfigV
   const oldSpeechRecognition = (speechRecognition as UnknownRecord | undefined) || {};
 
   return {
-    provider: normalizeSpeechProvider(oldSpeechRecognition.provider),
+    provider: normalizeSpeechRecognitionProvider(oldSpeechRecognition.provider),
     endpoint: (oldSpeechRecognition.endpoint as string | undefined) || '',
     modelName: (oldSpeechRecognition.modelName as string | undefined) || '',
     enableRealtimeTranscription: (oldSpeechRecognition.enableRealtimeTranscription as boolean | undefined) ?? true,
@@ -107,7 +99,7 @@ const migrateV0ToV1: Migration<UnknownRecord, AIConfigV1> = {
       speechRecognition: normalizeSpeechRecognitionConfig(oldConfig.speechRecognition),
       // Ensure imageOCR exists with defaults
       imageOCR: {
-        provider: (oldImageOCR.provider as 'local-ppocr' | 'qwen' | 'custom' | undefined) || 'local-ppocr',
+        provider: (oldImageOCR.provider as 'local-ppocr' | 'qwen' | 'jina' | 'custom' | undefined) || 'local-ppocr',
         useGeneralAI: (oldImageOCR.useGeneralAI as boolean | undefined) ?? false,
         localModel: 'ppocr-v6-small',
         apiKey: (oldImageOCR.apiKey as string | undefined) || '',

@@ -45,27 +45,27 @@ test('normalizeSettings migrates legacy speech provider and invalid enum values'
   assert.equal(normalized.imageOCR.localModel, 'ppocr-v6-small');
 });
 
-test('normalizeSettings selects plain output for Hunyuan-MT translation providers', () => {
+test('normalizeSettings selects plain output for Hy-MT2 translation providers', () => {
   const translationOverride = normalizeSettings({
     provider: 'custom',
-    endpoint: 'https://api.siliconflow.cn/v1',
-    modelName: 'tencent/Hunyuan-MT-7B',
+    endpoint: 'https://openrouter.ai/api/v1',
+    modelName: 'tencent/hy-mt2-7b',
     apiKey: 'translation-key',
   });
 
   const generalAI = normalizeSettings({
     generalAI: {
       apiKey: 'general-key',
-      endpoint: 'https://api.siliconflow.cn/v1',
-      modelName: 'Tencent/Hunyuan-MT-7B',
+      endpoint: 'https://openrouter.ai/api/v1',
+      modelName: 'Tencent/hy-mt2-7b',
       apiFormat: 'openai-chat',
     },
   });
 
   const explicitStructured = normalizeSettings({
     provider: 'custom',
-    endpoint: 'https://api.siliconflow.cn/v1',
-    modelName: 'tencent/Hunyuan-MT-7B',
+    endpoint: 'https://openrouter.ai/api/v1',
+    modelName: 'tencent/hy-mt2-7b',
     apiKey: 'translation-key',
     translation: {
       outputMode: 'structured',

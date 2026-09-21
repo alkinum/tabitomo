@@ -1,42 +1,35 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { afterEach, test } from 'node:test';
-import { createOpenRouterSession, exchangeOpenRouterCode, fetchAvailableModels, OPENROUTER_ENDPOINT } from './connections';
-import { DEFAULT_SETTINGS, hasProviderConnection, isLocalProviderEndpoint, normalizeSettings } from './settings';
-import { getOCRMode, selectOCRMode } from './inputOptions';
+import { fetchAvailableModels, OPENROUTER_ENDPOINT } from './connections';
+import { DEFAULT_SETTINGS, JINA_OCR_ENDPOINT, JINA_OCR_MODEL, hasProviderConnection, isLocalProviderEndpoint, normalizeSettings } from './settings';
+import { getOCRMode, selectOCRMode, supportsOCROverlay } from './inputOptions';
 import { exportConfigPayload, importConfigPayload } from './configExport';
+import { applyGeneralAIPreset, matchGeneralAIPreset } from './providerPresets';
 
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
 
-test('OpenRouter authorization uses random S256 PKCE and never exposes its verifier in the URL', () => {
-  const session = createOpenRouterSession();
-  const url = new URL(session.url);
-  assert.equal(url.origin, 'https://openrouter.ai');
-  assert.equal(url.searchParams.get('code_challenge'), createHash('sha256').update(session.verifier).digest('base64url'));
-  assert.equal(url.searchParams.get('code_challenge_method'), 'S256');
-  assert.equal(url.searchParams.has('callback_url'), false);
-  assert.equal(session.url.includes(session.verifier), false);
-  assert.match(session.verifier, /^[A-Za-z0-9_-]{43}$/);
-  assert.notEqual(session.verifier, createOpenRouterSession().verifier);
+test('OpenRouter discovers models directly with a user-supplied API key', async () => {
+  globalThis.fetch = async (url, init) => {
+    assert.equal(url, `${OPENROUTER_ENDPOINT}/models`);
+    assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer direct-key');
+    assert.equal(init?.method, undefined);
+    return Response.json({ data: [{ id: 'vendor/model' }] });
+  };
+  const models = await fetchAvailableModels({ ...DEFAULT_SETTINGS.generalAI, endpoint: OPENROUTER_ENDPOINT, apiKey: 'direct-key' });
+  assert.equal(models[0].id, 'vendor/model');
 });
 
-test('authorization exchanges only a nonexpired code with the fixed OpenRouter endpoint', async () => {
-  let calls = 0;
-  const session = createOpenRouterSession();
-  globalThis.fetch = async (url, init) => {
-    calls++;
-    assert.equal(url, `${OPENROUTER_ENDPOINT}/auth/keys`);
-    assert.deepEqual(JSON.parse(String(init?.body)), { code: 'one-time-code', code_verifier: session.verifier, code_challenge_method: 'S256' });
-    return Response.json({ key: 'returned-key' });
-  };
-  await assert.rejects(exchangeOpenRouterCode(session, ' '), /Paste/);
-  await assert.rejects(exchangeOpenRouterCode({ ...session, createdAt: Date.now() - 601_000 }, 'code'), /expired/);
-  assert.equal(calls, 0);
-  assert.equal(await exchangeOpenRouterCode(session, ' one-time-code '), 'returned-key');
-  assert.equal(calls, 1);
-  globalThis.fetch = async () => new Response('secret-key-and-code', { status: 400 });
-  await assert.rejects(exchangeOpenRouterCode(session, 'code'), (error: Error) => !error.message.includes('secret-key') && error.message.includes('400'));
+test('legacy protocol preferences and keys survive config import and share one OpenAI preset', async () => {
+  for (const apiFormat of ['openai-chat', 'openai-responses', 'anthropic'] as const) {
+    const settings = normalizeSettings({ generalAI: { apiFormat, apiKey: 'saved-key', endpoint: 'https://api.openai.com/v1', modelName: 'saved-model' } });
+    const restored = await importConfigPayload(await exportConfigPayload(settings, 'test-password'), 'test-password');
+    assert.deepEqual(restored.generalAI, settings.generalAI);
+    if (apiFormat !== 'anthropic') {
+      assert.equal(matchGeneralAIPreset(restored), 'openai');
+      assert.equal(applyGeneralAIPreset(restored, apiFormat).generalAI.apiKey, 'saved-key');
+    }
+  }
 });
 
 test('model discovery filters malformed entries, preserves unknown capabilities, and targets the selected service', async () => {
@@ -72,4 +65,23 @@ test('custom OCR and blank cloud defaults survive encrypted cross-platform confi
   assert.equal(restored.imageOCR.modelName, 'my-vision');
   assert.equal(restored.imageOCR.apiKey, '');
   assert.equal(getOCRMode(selectOCRMode(settings, 'general')), 'general');
+});
+
+test('Jina key-only setup survives encrypted export/import and isolates provider credentials', async () => {
+  const previous = normalizeSettings({ imageOCR: { provider: 'qwen', endpoint: 'https://old.example/v1', apiKey: 'old-key' } });
+  const jina = selectOCRMode(previous, 'jina');
+  assert.equal(jina.apiKey, '');
+  assert.equal(jina.endpoint, JINA_OCR_ENDPOINT);
+  assert.equal(jina.modelName, JINA_OCR_MODEL);
+  const settings = normalizeSettings({ imageOCR: { provider: 'jina', apiKey: 'jina-test-key', endpoint: '' } });
+  assert.equal(hasProviderConnection(settings.imageOCR), true);
+  assert.equal(selectOCRMode(settings, 'jina'), settings.imageOCR);
+  for (const mode of ['qwen', 'custom'] as const) {
+    assert.equal(selectOCRMode(settings, mode).apiKey, '');
+  }
+  const restored = await importConfigPayload(await exportConfigPayload(settings, 'test-password'), 'test-password');
+  assert.deepEqual(restored.imageOCR, settings.imageOCR);
+  assert.equal(getOCRMode(restored.imageOCR), 'jina');
+  assert.equal(supportsOCROverlay(restored.imageOCR), false);
+  assert.equal(supportsOCROverlay(selectOCRMode(settings, 'qwen')), true);
 });

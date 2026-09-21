@@ -1,5 +1,5 @@
 import { VoiceActivityDetector, VADConfig, VADCallbacks } from './vad';
-import { transcribeAudioSiliconFlow } from './audioTranscription';
+import { transcribeCloudAudio } from './audioTranscription';
 import { localAsrService } from './localAsr';
 import { AISettings } from '../config/settings';
 import type { LanguageCode } from '../translation/translation';
@@ -153,9 +153,9 @@ export class RealtimeTranscriptionService {
         });
 
         this.emitTranscript(text, true);
-      } else if (provider === 'siliconflow') {
-        // Use SiliconFlow transcription
-        const text = await transcribeAudioSiliconFlow(transcriptionBlob, this.settings);
+      } else if (provider === 'openai-compatible') {
+        // Use the configured compatible transcription service
+        const text = await transcribeCloudAudio(transcriptionBlob, this.settings);
 
         this.emitTranscript(text, true);
       } else {
@@ -176,7 +176,7 @@ export class RealtimeTranscriptionService {
    * Convert audio format if needed
    */
   private async convertAudioFormat(audioBlob: Blob): Promise<Blob> {
-    // SiliconFlow API expects webm or wav format
+    // Compatible transcription APIs accept webm or wav recordings
     // MediaRecorder produces webm by default, which is supported
     if (audioBlob.type.includes('webm') || audioBlob.type.includes('wav')) {
       return audioBlob;

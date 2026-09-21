@@ -8,11 +8,11 @@
 - Web 桌面使用原文／结果双栏，手机纵向排列；原生 App 保留安全区、原生相册／相机／语音及滚动布局。减少重复边框、嵌套卡片和大面积粗体，保留轻微平面阴影与按压反馈。
 - Translate / Explain / Q&A 位于语言选择之前。说明与问答只需结果语言；Web 切换文本模式保留已输入内容。错误、空态、等待、复制和朗读有明确状态。
 - 首次设置和后续设置都能连接 OpenRouter、手填兼容服务，或导入加密配置。连接并选择模型后可直接 Start translating，语音／图片选项可稍后调整。
-- 默认云模型 ID 留空；不自动指定 TeleAI、Qwen 或 ModelScope 的模型。显式选择的旧配置仍可导入。旧 `siliconflow` ASR 枚举仅保留作配置兼容，执行的是通用 `audio/transcriptions` 协议。
+- 默认云模型 ID 留空；不自动指定 TeleAI、Qwen 或 ModelScope 的模型。显式选择的旧配置仍可导入。语音类型为 `openai-compatible`，旧枚举仅在配置导入边界迁移；SiliconFlow 与旧 HY-MT 专用接入已删除。
 
 ## 凭据与模型选择
 
-OpenRouter 使用官方 **不带 callback_url 的 PKCE 授权流程**：打开系统浏览器，用户授权后把一次性 code 粘回应用。它减少了手工找 API key 的步骤，但不是自动深链返回的一键登录。验证码与 verifier 仅在当前组件内存中；交换限于官方地址；过期或退出后可重新连接。获取的 key 是待保存设置，iOS 保存沿用 SecureStore / 既有 CloudKit 路径，Web 沿用本机设置存储。
+OpenRouter 直接填写 API key，不提供 OAuth/code 交换界面。iOS 保存沿用 SecureStore / 既有 CloudKit 路径，Web 沿用本机设置存储。
 
 模型列表由用户点击后向所选服务的 `/models` 读取；可搜索、按提供方声明的图像能力筛选，也始终可手填 ID。没有能力元数据时显示为未知，不猜测模型支持视觉。模型列表不是可用额度或实际推理成功的保证。
 
@@ -20,7 +20,7 @@ Ollama（通常 `http://电脑局域网地址:11434/v1`）、LM Studio（通常 
 
 语音接口允许独立 endpoint、model 和 key；只在服务基地址完全相同时复用已有凭据，避免把 General AI key 发给另一个语音服务。切换预设服务会清空旧 key。
 
-官方授权依据：<https://openrouter.ai/docs/guides/overview/auth/oauth>。
+当前翻译接入契约见 [通用翻译模型与 Hy-MT2](translation-models.zh-CN.md)。
 
 ## OCR / 视觉能力边界
 

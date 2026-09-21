@@ -1,10 +1,32 @@
 # tabitomo App 全能力需求文档
 
+## 2026-09-20 Safe Area 修正
+
+原生主页面、弹层和全屏图片按各自系统 inset 布局，新增 UIKit 屏幕坐标模块处理 pageSheet 键盘遮挡并验证实际边界。Web 页面、固定弹窗与相机/通知控件同步处理安全边距。此项替代旧截图对安全区的判断，不影响 provider、配置、持久化和 CloudKit 状态，也不等同于发布级真机验收。详见 [修正与证据](safe-area-review-2026-09-20.md)。
+
+## 2026-09-20 移除旧版 HY-MT 与 SiliconFlow
+
+已删除旧版翻译模型的专用 prompt、强制 plain、删尾处理及原生测试场景；删除 SiliconFlow 的 AI/翻译/语音预设。语音统一使用 `openai-compatible`，旧枚举仅在导入边界迁移。Hy-MT2 与通用 API 配置保留。此决策替代下文历史记录中的旧接入说明，详见 [当前接入契约](translation-models.zh-CN.md)。
+
+## 2026-09-20 通用翻译模型与 Hy-MT2
+
+Web/Expo 设置与首次配置均支持独立翻译供应商、API key、实时模型目录和手填 ID，删除旧版 HY-MT 与 SiliconFlow 专用接入。新选专用模型默认 plain，高级输出折叠；MT2 与旧版模型分开处理，保留已有配置和 General AI 复用。见 [接入契约与资料](translation-models.zh-CN.md)。真实付费推理与翻译质量仍待验收。
+
+## 2026-09-20 Mobile 设计与功能 review
+
+已修复文本/图片取消后 busy 不恢复、旧结果回写、图片主按钮行为、同语言助手限制、保存失败无反馈、扫码 sheet 呈现与旧语音 session 回调等问题；统一表单/按钮样式、设置分组、首次配置主操作和原生弹层。iCloud 开关只同步已保存配置，失败不提前改变内存偏好。本轮不改变 shared settings schema 或加密格式。
+
+56 项 core 测试、两层 typecheck、444 项 parity audit、Expo web smoke、Web build 通过；Web E2E 60 场景完成（含 2 项 Safari 超时后的独立重试）。iOS Release simulator 的 16 场景通过，最终弹层修正后再通过 3 项复测；已检查 390×844 / 320×720 明暗界面。真机媒体、iCloud 和辅助功能仍需独立验收，不据此更新发布完成状态。详见 [完整问题与验证记录](mobile-design-functional-review-2026-09-20.md)。
+
+## 2026-09-20 Jina OCR
+
+Web/Expo 设置和首次配置新增 Jina OCR，仅填写 API key。共享核心固定官方 endpoint 和 `jina-ocr-v1`，返回文字/Markdown，不提供坐标覆盖，也不复用为直接翻译 VLM。已补配置归一化、加密导入导出、错误/取消/超时、两端行为 smoke 与 iOS `settings-jina` 场景；无需原生模块改动。Qwen 的 endpoint/model 默认折叠。真实 Jina 识别质量和签名设备 QA 仍待验收，不能以 mock 结果作为发布放行证据。实现和官方资料见 [OCR 接入契约](cloud-ocr-provider-research.zh-CN.md)。
+
 ## 2026-09-08 design and provider revision
 
-Web and Expo now consume shared light/dark indigo tokens and shared settings normalization. Desktop uses two columns; phone uses native stacked panels. Settings and onboarding include OpenRouter browser authorization with pasted one-time code (PKCE, no callback URL), explicit live model discovery, editable model IDs, and direct completion after AI setup. OCR supports local geometry, General AI text extraction, custom compatible vision text extraction, and the existing explicit Qwen coordinate adapter. ASR accepts arbitrary compatible endpoints; blank model IDs no longer choose TeleAI, and credentials are reused only for the same base URL. Local-network model endpoints may omit a key. There is no bundled native VLM runtime or new claim of on-device benchmark superiority.
+Web and Expo now consume shared light/dark indigo tokens and shared settings normalization. Desktop uses two columns; phone uses native stacked panels. Settings and onboarding use a direct OpenRouter API key field, explicit live model discovery, editable model IDs, and automatic OpenAI-compatible Chat/Responses negotiation. OCR supports local geometry, General AI text extraction, custom compatible vision text extraction, and the existing explicit Qwen coordinate adapter. ASR accepts arbitrary compatible endpoints; blank model IDs no longer choose TeleAI, and credentials are reused only for the same base URL. Local-network model endpoints may omit a key. There is no bundled native VLM runtime or new claim of on-device benchmark superiority.
 
-This supersedes older ledger statements that cloud OCR only accepts Qwen, or that General AI/custom OCR is unavailable. Existing Qwen configs and the legacy `siliconflow` ASR enum remain import-compatible. See [design and model decisions](design-and-model-revision.zh-CN.md) for architecture, candidates, official sources and verification limits. Signed-device account/permissions/CloudKit/model quality checks remain required.
+This supersedes older ledger statements that cloud OCR only accepts Qwen, or that General AI/custom OCR is unavailable. Existing Qwen configs remain import-compatible; old ASR IDs migrate to `openai-compatible` at import. See [design and model decisions](design-and-model-revision.zh-CN.md) for architecture, candidates, official sources and verification limits. Signed-device account/permissions/CloudKit/model quality checks remain required.
 
 
 状态：实施跟进中
@@ -100,7 +122,7 @@ tabitomo 是面向旅行者、语言学习者和跨语言沟通场景的 AI 翻�
 | APP-TEXT-003 | P0 | 文本停止输入后自动执行当前模式，并允许手动执行 | 已实现初版 | iOS `main` smoke；真实 UI 复核待完成 |
 | APP-TEXT-004 | P0 | 新请求取消旧请求，避免旧结果覆盖新输入 | 已实现初版 | shared/mobile implementation；真实 provider 压测待完成 |
 | APP-TEXT-005 | P0 | 翻译结果支持复制、TTS 朗读、清晰错误状态 | 已实现初版 | Device QA TTS 待真机完成 |
-| APP-TEXT-006 | P0 | 保持 Web prompt/provider/output mode 行为，包括 Hunyuan-MT plain 输出约束 | 已实现初版 | `settings-hunyuan-output` smoke；真实 provider 待完成 |
+| APP-TEXT-006 | P0 | 保持 Web prompt/provider/output mode 行为，包括 Hy-MT2 与自定义模型的 plain 输出约束 | 已实现初版 | `settings-hunyuan-output` smoke；真实 provider 待完成 |
 | APP-TEXT-007 | P1 | 重复翻译可使用短期内存缓存，减少重复请求 | 已实现初版 | mobile implementation；无需单独发布阻断 |
 | APP-TEXT-008 | P1 | 复制结果后，移动端按钮需要像 Web 一样给出短暂 `Copied` / Check 图标反馈，并在新结果出现时复位 | 已实现初版；新增 `resultCopied` 和复制复位 timer | parity audit 270 checks；聚焦 `main` iOS simulator smoke |
 

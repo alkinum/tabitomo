@@ -25,7 +25,7 @@ export const translationSchema = {
  * Speech Recognition Config Schema
  */
 export const speechRecognitionSchema = {
-  provider: schema.enum(['web-speech', 'siliconflow', 'local'] as const, {
+  provider: schema.enum(['web-speech', 'openai-compatible', 'local'] as const, {
     default: 'web-speech',
   }),
   endpoint: schema.string({ optional: true, default: '' }),
@@ -73,7 +73,7 @@ export const generalAISchema = {
  * Image OCR Config Schema
  */
 export const imageOCRSchema = {
-  provider: schema.enum(['local-ppocr', 'qwen', 'custom'] as const, { default: 'local-ppocr' }),
+  provider: schema.enum(['local-ppocr', 'qwen', 'jina', 'custom'] as const, { default: 'local-ppocr' }),
   useGeneralAI: schema.boolean({ optional: true, default: false }),
   localModel: schema.enum(['ppocr-v6-small'] as const, { optional: true, default: 'ppocr-v6-small' }),
   apiKey: schema.string({ default: '' }),
@@ -141,7 +141,7 @@ export type AIConfigV1 = {
     outputMode: 'plain' | 'structured';
   };
   speechRecognition: {
-    provider: 'web-speech' | 'siliconflow' | 'local';
+    provider: 'web-speech' | 'openai-compatible' | 'local';
     endpoint?: string;
     apiKey?: string;
     modelName?: string;
@@ -158,7 +158,7 @@ export type AIConfigV1 = {
     whisperModelDownloaded?: boolean;
   };
   imageOCR: {
-    provider: 'local-ppocr' | 'qwen' | 'custom';
+    provider: 'local-ppocr' | 'qwen' | 'jina' | 'custom';
     useGeneralAI?: boolean;
     localModel?: 'ppocr-v6-small';
     apiKey: string;

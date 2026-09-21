@@ -1,0 +1,33 @@
+{
+  "scene": "settings",
+  "name": "sheet",
+  "insets": {
+    "top": 0,
+    "right": 0,
+    "bottom": 34,
+    "left": 0
+  },
+  "outer": {
+    "y": 59,
+    "x": 0,
+    "height": 793,
+    "width": 393
+  },
+  "inner": {
+    "width": 393,
+    "x": 0,
+    "height": 747,
+    "y": 59
+  },
+  "keyboardVisible": false,
+  "checks": {
+    "top": true,
+    "left": true,
+    "right": true,
+    "bottom": true,
+    "keyboard": true,
+    "nativeInsets": true,
+    "nativeScreenCoordinates": true
+  },
+  "passed": true
+}

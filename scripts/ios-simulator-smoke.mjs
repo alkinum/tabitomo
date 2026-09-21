@@ -13,6 +13,7 @@ const configuration = process.env.IOS_SMOKE_CONFIGURATION || 'Release';
 const bundleId = process.env.IOS_SMOKE_BUNDLE_ID || 'com.backrunner.tabitomo';
 const keepArtifacts = process.env.IOS_SMOKE_KEEP_ARTIFACTS === '1';
 const verboseXcode = process.env.IOS_SMOKE_VERBOSE_XCODE === '1';
+const preferredContentSize = process.env.IOS_SMOKE_CONTENT_SIZE;
 const requestedSmokeScenes = (process.env.IOS_SMOKE_SCENES || '')
   .split(',')
   .map((scene) => scene.trim())
@@ -21,7 +22,6 @@ const smokeSceneFileName = 'tabitomo-smoke-scene.json';
 const smokeSceneAckFileName = 'tabitomo-smoke-scene-ack.json';
 const modelPackSmokeResultFileName = 'tabitomo-model-pack-smoke-result.json';
 const configRoundTripSmokeResultFileName = 'tabitomo-config-roundtrip-smoke-result.json';
-const hunyuanOutputSmokeResultFileName = 'tabitomo-hunyuan-output-smoke-result.json';
 const textProviderSmokeResultFileName = 'tabitomo-text-provider-smoke-result.json';
 const imageProviderSmokeResultFileName = 'tabitomo-image-provider-smoke-result.json';
 const speechProviderSmokeResultFileName = 'tabitomo-speech-provider-smoke-result.json';
@@ -475,6 +475,10 @@ try {
   run('xcrun', ['simctl', '--set', deviceSetPath, 'boot', deviceId]);
   run('xcrun', ['simctl', '--set', deviceSetPath, 'bootstatus', deviceId, '-b']);
   run('xcrun', ['simctl', '--set', deviceSetPath, 'ui', deviceId, 'appearance', 'light']);
+  if (preferredContentSize) {
+    run('xcrun', ['simctl', '--set', deviceSetPath, 'ui', deviceId, 'content_size', preferredContentSize]);
+    console.log(`Dynamic Type: ${preferredContentSize}`);
+  }
 
   console.log(`Installing ${bundleId}...`);
   run('xcrun', ['simctl', '--set', deviceSetPath, 'install', deviceId, appPath]);
@@ -493,7 +497,6 @@ try {
   const smokeSceneAckFile = path.join(dataContainer, 'Documents', smokeSceneAckFileName);
   const modelPackSmokeResultFile = path.join(dataContainer, 'Documents', modelPackSmokeResultFileName);
   const configRoundTripSmokeResultFile = path.join(dataContainer, 'Documents', configRoundTripSmokeResultFileName);
-  const hunyuanOutputSmokeResultFile = path.join(dataContainer, 'Documents', hunyuanOutputSmokeResultFileName);
   const textProviderSmokeResultFile = path.join(dataContainer, 'Documents', textProviderSmokeResultFileName);
   const imageProviderSmokeResultFile = path.join(dataContainer, 'Documents', imageProviderSmokeResultFileName);
   const speechProviderSmokeResultFile = path.join(dataContainer, 'Documents', speechProviderSmokeResultFileName);
@@ -504,7 +507,6 @@ try {
   await rm(smokeSceneAckFile, { force: true });
   await rm(modelPackSmokeResultFile, { force: true });
   await rm(configRoundTripSmokeResultFile, { force: true });
-  await rm(hunyuanOutputSmokeResultFile, { force: true });
   await rm(textProviderSmokeResultFile, { force: true });
   await rm(imageProviderSmokeResultFile, { force: true });
   await rm(speechProviderSmokeResultFile, { force: true });
@@ -518,7 +520,22 @@ try {
     run('xcrun', ['simctl', '--set', deviceSetPath, 'launch', '--terminate-running-process', deviceId, bundleId]);
     await new Promise((resolve) => setTimeout(resolve, waitMs));
   };
+  // simctl launch can return before the first cold-start frame reaches the screen.
+  // Use the same app acknowledgement as the scene checks instead of capturing SpringBoard.
+  await writeFile(smokeSceneFile, JSON.stringify({ scene: 'main' }), 'utf8');
   await launchApp();
+  await waitForJsonFile(smokeSceneAckFile, 60000, (candidate) => candidate?.scene === 'main');
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+
+  const checkSafeArea = async (scene, surface = 'workspace', suffix = scene) => {
+    const file = path.join(dataContainer, 'Documents', `tabitomo-safe-area-${surface}.json`);
+    const requiresKeyboard = scene === 'main-keyboard' || scene === 'settings-keyboard';
+    const result = await waitForJsonFile(file, 20000, value => value?.scene === scene && value.passed === true && (!requiresKeyboard || value.keyboardVisible));
+    if (result.passed !== true) throw new Error(`Unsafe native layout: ${JSON.stringify(result)}`);
+    await writeFile(path.join(artifactsDir, `safe-area-${suffix}.json`), JSON.stringify(result, null, 2));
+    console.log(`Safe Area passed: ${suffix}; top=${result.insets.top}, bottom=${result.insets.bottom}, contentY=${result.inner.y}.`);
+  };
+  await checkSafeArea('main', 'workspace', 'first-screen-light');
 
   const capturedScreenshots = [];
   const captureScreenshot = async (name) => {
@@ -534,6 +551,7 @@ try {
 
   run('xcrun', ['simctl', '--set', deviceSetPath, 'ui', deviceId, 'appearance', 'dark']);
   await new Promise((resolve) => setTimeout(resolve, 2000));
+  await checkSafeArea('main', 'workspace', 'first-screen-dark');
   const darkSize = await captureScreenshot('first-screen-dark');
 
   run('xcrun', ['simctl', '--set', deviceSetPath, 'ui', deviceId, 'appearance', 'light']);
@@ -542,6 +560,8 @@ try {
   const allSmokeScenes = [
     'main',
     'main-keyboard',
+    'safe-area-return',
+    'settings-keyboard',
     'config-guidance',
     'markdown',
     'longtext',
@@ -553,11 +573,12 @@ try {
     'device-qa',
     'settings',
     'settings-image',
+    'settings-jina',
     'settings-config',
     'settings-qr',
     'settings-qr-import',
     'settings-config-roundtrip',
-    'settings-hunyuan-output',
+    'settings-hymt2',
     'text-provider-smoke',
     'image-provider-smoke',
     'speech-provider-smoke',
@@ -574,6 +595,7 @@ try {
     throw new Error(`Unknown iOS smoke scene(s): ${invalidRequestedScenes.join(', ')}`);
   }
   const smokeScenes = requestedSmokeScenes.length > 0 ? requestedSmokeScenes : allSmokeScenes;
+  let keyboardWarmed = false;
 
   for (const scene of smokeScenes) {
     console.log(`Opening smoke scene: ${scene}...`);
@@ -591,9 +613,6 @@ try {
     }
     if (scene === 'settings-config-roundtrip') {
       await rm(configRoundTripSmokeResultFile, { force: true });
-    }
-    if (scene === 'settings-hunyuan-output') {
-      await rm(hunyuanOutputSmokeResultFile, { force: true });
     }
     if (scene === 'settings-qr-import') {
       await rm(qrImportSmokeResultFile, { force: true });
@@ -618,8 +637,6 @@ try {
         ? 11000
       : scene === 'settings-config-roundtrip'
         ? 9000
-        : scene === 'settings-hunyuan-output'
-          ? 7000
         : scene === 'settings-qr-import'
           ? 9000
         : scene.startsWith('settings') || scene.startsWith('setup') ? 6500 : 5500);
@@ -628,6 +645,20 @@ try {
       20000,
       (candidate) => candidate?.scene === scene,
     );
+    if (!keyboardWarmed && (scene === 'main-keyboard' || scene === 'settings-keyboard')) {
+      // A fresh simulator presents the one-time QuickPath introduction instead
+      // of keys. Reopen after that first presentation to capture the keyboard.
+      keyboardWarmed = true;
+      await rm(smokeSceneAckFile, { force: true });
+      await launchApp(6500);
+      await waitForJsonFile(smokeSceneAckFile, 20000, candidate => candidate?.scene === scene);
+    }
+    // The acknowledgement is written before React commits the scene. Let the
+    // native sheet presentation finish even when cold startup exceeded waitMs.
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    if (['main', 'main-keyboard', 'config-guidance', 'safe-area-return'].includes(scene)) await checkSafeArea(scene);
+    if (['settings', 'settings-keyboard', 'settings-hymt2', 'setup-manual', 'language-picker', 'qr-scanner', 'device-qa'].includes(scene)) await checkSafeArea(scene, 'sheet');
+    if (scene === 'image-lightbox') await checkSafeArea(scene, 'lightbox');
     await captureScreenshot(`smoke-${scene}`);
     if (scene === 'settings-qr-import') {
       const result = await waitForJsonFile(
@@ -680,26 +711,6 @@ try {
         throw new Error('Config round-trip smoke result must not include the encrypted payload.');
       }
       console.log(`Config round-trip smoke passed: payloadLength=${result.payloadLength}.`);
-    }
-    if (scene === 'settings-hunyuan-output') {
-      const result = await waitForJsonFile(
-        hunyuanOutputSmokeResultFile,
-        20000,
-        (candidate) => candidate && candidate.status !== 'running',
-      );
-      if (
-        result.passed !== true
-        || result.outputMode !== 'plain'
-        || result.structuredDisabled !== true
-        || !String(result.modelName || '').toLowerCase().includes('hunyuan-mt')
-      ) {
-        throw new Error(`Hunyuan output smoke failed: ${JSON.stringify(result)}`);
-      }
-      const serialized = JSON.stringify(result);
-      if (serialized.includes('ios-smoke-hunyuan-key')) {
-        throw new Error('Hunyuan output smoke result leaked a provider secret marker.');
-      }
-      console.log(`Hunyuan output smoke passed: model=${result.modelName}, outputMode=${result.outputMode}.`);
     }
     if (scene === 'text-provider-smoke') {
       const result = await waitForJsonFile(
@@ -845,7 +856,9 @@ try {
     }
   }
 
-  await ensureDistinctScreenshots(capturedScreenshots);
+  // The initial main scene may intentionally also occur in the requested scenes.
+  await ensureDistinctScreenshots(capturedScreenshots.slice(0, 2));
+  await ensureDistinctScreenshots(capturedScreenshots.slice(2));
 
   success = true;
   console.log(

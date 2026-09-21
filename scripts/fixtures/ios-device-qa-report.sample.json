@@ -73,7 +73,7 @@
       "label": "Provider speech",
       "status": "recorded",
       "outcome": "passed",
-      "result": "Provider speech upload passed; provider=siliconflow; transcript=12 chars",
+      "result": "Provider speech upload passed; provider=openai-compatible; transcript=12 chars",
       "startedAt": "2026-07-09T02:10:11.000Z",
       "finishedAt": "2026-07-09T02:10:12.600Z",
       "durationMs": 1600

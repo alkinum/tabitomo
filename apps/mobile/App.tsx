@@ -1,7 +1,10 @@
+import { getTranslationConnection, updateTranslationConnection, hasTranslationOverride } from '@tabitomo/core';
+import { SETTINGS_SECTIONS, type SettingsSectionId } from '@tabitomo/core';
 import { lightTheme, darkTheme, type AppTheme } from '@tabitomo/core';
-import { OCR_HELP, LOCAL_MODEL_GUIDANCE, getOCRMode, selectOCRMode } from '@tabitomo/core';
+import { OCR_HELP, LOCAL_MODEL_GUIDANCE, OCR_MODE_OPTIONS, getOCRMode, selectOCRMode, supportsOCROverlay } from '@tabitomo/core';
 import { hasProviderConnection } from '@tabitomo/core';
 import { AIConnection } from './src/AIConnection';
+import { createControlStyles } from './src/controlStyles';
 import { NativeMaterial, NativePreferencesProvider, useNativePreferences, selectionFeedback, actionFeedback } from './src/NativeChrome';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
@@ -34,7 +37,6 @@ import {
 } from 'react-native';
 import * as QRCode from 'qrcode';
 import { StatusBar } from 'expo-status-bar';
-import { LinearGradient } from 'expo-linear-gradient';
 import * as Clipboard from 'expo-clipboard';
 import { Camera as ExpoCamera, CameraView, type BarcodeScanningResult } from 'expo-camera';
 import * as DocumentPicker from 'expo-document-picker';
@@ -51,10 +53,10 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import * as Sharing from 'expo-sharing';
 import * as Speech from 'expo-speech';
-import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaProvider, initialWindowMetrics, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaLayout, SafeAreaAuditContext, SheetKeyboardAvoidingView, useKeyboardVisible } from './src/SafeAreaLayout';
 import {
   ArrowLeftRight,
-  ArrowRight,
   Camera,
   Check,
   ChevronDown,
@@ -75,7 +77,6 @@ import {
   ScanText,
   Settings,
   Share2,
-  Sparkles,
   Upload,
   Volume2,
   X,
@@ -100,7 +101,6 @@ import {
   type NativeLocalModelId,
 } from '@tabitomo/native-local-models';
 import {
-  API_FORMAT_OPTIONS,
   DASHSCOPE_OCR_ENDPOINT,
   DASHSCOPE_OCR_INTL_ENDPOINT,
   DEFAULT_SETTINGS,
@@ -109,7 +109,6 @@ import {
   LANGUAGE_OPTIONS,
   SUPPORTED_LANGUAGES,
   type AISettings,
-  type APIFormat,
   type ImageOCRSettings,
   type InstalledModelPack,
   type ModelPackActivation,
@@ -133,6 +132,7 @@ import {
   evaluateInstalledModelPackCompatibility,
   hasFuriganaReadings,
   hasGeneralAISettings,
+  getSpeechConnection,
   hasJapaneseText,
   importConfigPayload,
   formatModelPackBytes,
@@ -198,14 +198,17 @@ interface CachedTextResult {
 const SMOKE_SCENES = [
   'main',
   'main-keyboard',
+  'safe-area-return',
+  'settings-keyboard',
   'config-guidance',
   'settings',
   'settings-image',
+  'settings-jina',
   'settings-config',
   'settings-qr',
   'settings-qr-import',
   'settings-config-roundtrip',
-  'settings-hunyuan-output',
+  'settings-hymt2',
   'settings-local',
   'settings-model-packs',
   'settings-model-pack-install',
@@ -234,29 +237,12 @@ const IOS_AVAILABLE_MODEL_PACK_RUNTIMES: readonly ModelPackRuntime[] = isNativeL
   : ['apple-speech', 'apple-vision', 'server-fallback'];
 const FALLBACK_AVAILABLE_MODEL_PACK_RUNTIMES: readonly ModelPackRuntime[] = ['server-fallback'];
 type SmokeScene = typeof SMOKE_SCENES[number];
-type SettingsSmokeVariant = 'qr-export' | 'qr-import' | 'config-roundtrip' | 'hunyuan-output' | 'local-runtime' | 'model-packs' | 'model-pack-install';
+type SettingsSmokeVariant = 'qr-export' | 'qr-import' | 'config-roundtrip' | 'local-runtime' | 'model-packs' | 'model-pack-install';
 type SettingsJumpId = 'general' | 'translation' | 'speech' | 'image' | 'local' | 'config';
-type SettingsCategoryId = 'ai' | 'speech' | 'image' | 'offline' | 'config';
-const SETTINGS_CATEGORY_ITEMS: readonly {
-  id: SettingsCategoryId;
-  label: string;
-  icon: React.ComponentType<{ size?: number; color?: string; strokeWidth?: number }>;
-}[] = [
-  { id: 'ai', label: 'AI', icon: Sparkles },
-  { id: 'speech', label: 'Speech', icon: Mic },
-  { id: 'image', label: 'Image', icon: ScanText },
-  { id: 'offline', label: 'Offline', icon: Download },
-  { id: 'config', label: 'Config', icon: Settings },
-];
-const getSettingsCategoryForJump = (target?: SettingsJumpId | null): SettingsCategoryId => {
-  if (target === 'speech' || target === 'image' || target === 'config') {
-    return target;
-  }
-  if (target === 'local') {
-    return 'offline';
-  }
-  return 'ai';
-};
+type SettingsCategoryId = SettingsSectionId;
+const SETTINGS_CATEGORY_ITEMS = SETTINGS_SECTIONS;
+const getSettingsCategoryForJump = (target?: SettingsJumpId | null): SettingsCategoryId =>
+  target === 'local' ? 'offline' : target || 'general';
 interface SmokeSceneOptions {
   modelPackManifestUrl?: string;
   textProviderEndpoint?: string;
@@ -316,13 +302,10 @@ interface PreparedImageData {
 
 const isBusy = (state: BusyState): boolean => state !== 'idle';
 
-const SILICONFLOW_ENDPOINT = 'https://api.siliconflow.cn/v1';
-const HUNYUAN_MT_MODEL = 'tencent/Hunyuan-MT-7B';
 const SMOKE_SCENE_FILE_NAME = 'tabitomo-smoke-scene.json';
 const SMOKE_SCENE_ACK_FILE_NAME = 'tabitomo-smoke-scene-ack.json';
 const SMOKE_MODEL_PACK_RESULT_FILE_NAME = 'tabitomo-model-pack-smoke-result.json';
 const SMOKE_CONFIG_ROUND_TRIP_RESULT_FILE_NAME = 'tabitomo-config-roundtrip-smoke-result.json';
-const SMOKE_HUNYUAN_OUTPUT_RESULT_FILE_NAME = 'tabitomo-hunyuan-output-smoke-result.json';
 const SMOKE_TEXT_PROVIDER_RESULT_FILE_NAME = 'tabitomo-text-provider-smoke-result.json';
 const SMOKE_IMAGE_PROVIDER_RESULT_FILE_NAME = 'tabitomo-image-provider-smoke-result.json';
 const SMOKE_SPEECH_PROVIDER_RESULT_FILE_NAME = 'tabitomo-speech-provider-smoke-result.json';
@@ -381,7 +364,6 @@ const deviceTypeLabel = (deviceType: Device.DeviceType | null): string => {
   }
 };
 
-const isHunyuanMTModel = (modelName: string): boolean => modelName.toLowerCase().includes('hunyuan-mt');
 
 const createSyntheticSpeechWav = (): Uint8Array => {
   const sampleRate = 16_000;
@@ -493,9 +475,9 @@ const SMOKE_SETTINGS: AISettings = normalizeSettings({
   apiKey: 'smoke-translation-key',
   speechRecognition: {
     ...DEFAULT_SETTINGS.speechRecognition,
-    provider: 'siliconflow',
+    provider: 'openai-compatible',
     apiKey: 'smoke-speech-key',
-    modelName: 'TeleAI/TeleSpeechASR',
+    modelName: 'mock-transcription-model',
   },
   imageOCR: {
     ...DEFAULT_SETTINGS.imageOCR,
@@ -605,7 +587,7 @@ const createSpeechProviderSmokeSettings = (endpoint: string): AISettings => norm
   ...SMOKE_SETTINGS,
   speechRecognition: {
     ...SMOKE_SETTINGS.speechRecognition,
-    provider: 'siliconflow',
+    provider: 'openai-compatible',
     endpoint,
     modelName: 'tabitomo-native-speech-smoke',
     apiKey: SMOKE_SPEECH_PROVIDER_API_KEY,
@@ -631,7 +613,7 @@ const createQrImportSmokeSettings = (): AISettings => normalizeSettings({
   },
   speechRecognition: {
     ...SMOKE_SETTINGS.speechRecognition,
-    provider: 'siliconflow',
+    provider: 'openai-compatible',
     endpoint: 'https://qr-import.example.test/v1',
     modelName: 'tabitomo-qr-import-speech',
     apiKey: SMOKE_QR_IMPORT_SPEECH_API_KEY,
@@ -663,7 +645,7 @@ const getQrImportSmokeChecks = (settings: AISettings): Record<string, boolean> =
     && settings.endpoint === 'https://qr-import.example.test/v1'
     && settings.modelName === 'tabitomo-qr-import-translation'
     && settings.translation.outputMode === 'plain',
-  speech: settings.speechRecognition.provider === 'siliconflow'
+  speech: settings.speechRecognition.provider === 'openai-compatible'
     && settings.speechRecognition.endpoint === 'https://qr-import.example.test/v1'
     && settings.speechRecognition.modelName === 'tabitomo-qr-import-speech',
   ocr: settings.imageOCR.provider === 'custom'
@@ -824,23 +806,6 @@ const writeConfigRoundTripSmokeResult = (result: Record<string, unknown>): void 
   }
 };
 
-const writeHunyuanOutputSmokeResult = (result: Record<string, unknown>): void => {
-  if (Platform.OS === 'web') {
-    return;
-  }
-
-  try {
-    const file = new File(Paths.document, SMOKE_HUNYUAN_OUTPUT_RESULT_FILE_NAME);
-    file.create({ overwrite: true });
-    file.write(JSON.stringify({
-      ...result,
-      writtenAt: new Date().toISOString(),
-    }, null, 2));
-  } catch {
-    // Simulator smoke should still surface failures through the visible status text.
-  }
-};
-
 const writeTextProviderSmokeResult = (result: Record<string, unknown>): void => {
   if (Platform.OS === 'web') {
     return;
@@ -954,6 +919,7 @@ const isCloudImageConfigured = (settings: AISettings, mode: ImageMode): boolean 
     if (settings.vlm.useCustom) {
       return Boolean(hasProviderConnection(settings.vlm));
     }
+    if (settings.imageOCR.provider === 'jina' && !settings.imageOCR.useGeneralAI) return false;
     if (settings.imageOCR.provider === 'local-ppocr') {
       return Platform.OS === 'ios';
     }
@@ -1096,7 +1062,7 @@ function useAppTheme() {
 
 export default function App() {
   return (
-    <SafeAreaProvider>
+    <SafeAreaProvider initialMetrics={initialWindowMetrics}>
       <NativePreferencesProvider><AppContent /></NativePreferencesProvider>
     </SafeAreaProvider>
   );
@@ -1104,20 +1070,15 @@ export default function App() {
 
 function AppContent() {
   const colorScheme = useColorScheme();
-  const { width: viewportWidth } = useWindowDimensions();
+  const { width: viewportWidth, fontScale } = useWindowDimensions();
   const theme = useMemo(() => getAppTheme(colorScheme), [colorScheme]);
   const styles = useMemo(() => createStyles(theme), [theme]);
   const themeContext = useMemo(() => ({ theme, styles }), [styles, theme]);
-  const insets = useSafeAreaInsets();
   const isCompactViewport = viewportWidth <= 430;
   const isNarrowViewport = viewportWidth <= 340;
+  const usesLargeText = fontScale > 1.3;
   const sourceToolbarButtonSize = 44;
-  const [keyboardVisible, setKeyboardVisible] = useState(false);
-  useEffect(() => {
-    const show = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow', () => setKeyboardVisible(true));
-    const hide = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide', () => setKeyboardVisible(false));
-    return () => { show.remove(); hide.remove(); };
-  }, []);
+  const keyboardVisible = useKeyboardVisible();
   const [settings, setSettings] = useState<AISettings>(DEFAULT_SETTINGS);
   const [isReady, setIsReady] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -1141,6 +1102,7 @@ function AppContent() {
   const [overlayItems, setOverlayItems] = useState<OverlayItem[]>([]);
   const [busyState, setBusyState] = useState<BusyState>('idle');
   const [notice, setNotice] = useState<string | null>(null);
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [configGuidanceOverride, setConfigGuidanceOverride] = useState<ConfigGuidance | null>(null);
   const [nativeSpeechActive, setNativeSpeechActive] = useState(false);
   const [nativeSpeechMode, setNativeSpeechMode] = useState<'standard' | 'on-device' | null>(null);
@@ -1158,16 +1120,52 @@ function AppContent() {
   const isVoiceRecording = recorderState.isRecording || nativeSpeechActive;
   const sourceInputRef = useRef<TextInput>(null);
   const textActionAbortRef = useRef<AbortController | null>(null);
+  const imageActionAbortRef = useRef<AbortController | null>(null);
   const textAutoRunTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resultCopyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastAutoTextRunKeyRef = useRef<string | null>(null);
   const translationCacheRef = useRef<Map<string, CachedTextResult>>(new Map());
   const imageLanguageContextRef = useRef(false);
   const localRecordingPackRef = useRef<InstalledModelPack | null>(null);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const recordingStartRef = useRef(false);
+
+  const cancelWorkspaceRequest = () => {
+    textActionAbortRef.current?.abort();
+    imageActionAbortRef.current?.abort();
+    textActionAbortRef.current = null;
+    imageActionAbortRef.current = null;
+    if (textAutoRunTimerRef.current) clearTimeout(textAutoRunTimerRef.current);
+    textAutoRunTimerRef.current = null;
+    lastAutoTextRunKeyRef.current = null;
+    setWorkspaceError(null);
+    setConfigGuidanceOverride(null);
+    setBusyState((current) => current === 'translating' || current === 'image' ? 'idle' : current);
+  };
+
+  const handleEditSource = (text: string) => {
+    cancelWorkspaceRequest();
+    setSourceText(text);
+    setTargetText('');
+    setFuriganaTokens(null);
+    setNotice(null);
+  };
+
+  useEffect(() => {
+    void Speech.stop();
+    setIsSpeaking(false);
+    return () => { void Speech.stop(); };
+  }, [targetText, targetLang]);
 
   useEffect(() => {
     if (smokeScene !== 'main-keyboard') return;
     const timer = setTimeout(() => sourceInputRef.current?.focus(), 450);
+    return () => clearTimeout(timer);
+  }, [smokeScene]);
+
+  useEffect(() => {
+    if (smokeScene !== 'safe-area-return') return;
+    const timer = setTimeout(() => setShowSettings(false), 1800);
     return () => clearTimeout(timer);
   }, [smokeScene]);
 
@@ -1178,19 +1176,24 @@ function AppContent() {
     setSmokeTextProviderEndpoint(options.textProviderEndpoint?.trim() || null);
     setSmokeImageProviderEndpoint(options.imageProviderEndpoint?.trim() || null);
     setSmokeSpeechProviderEndpoint(options.speechProviderEndpoint?.trim() || null);
-    setSettings(scene === 'settings-image' ? SMOKE_IMAGE_SETTINGS : SMOKE_SETTINGS);
+    setSettings(scene === 'settings-jina'
+      ? normalizeSettings({ ...SMOKE_SETTINGS, imageOCR: { ...selectOCRMode(SMOKE_SETTINGS, 'jina'), apiKey: 'jina-smoke-key' } })
+      : scene === 'settings-image' ? SMOKE_IMAGE_SETTINGS : SMOKE_SETTINGS);
     setSettingsInitialJumpId(
-      scene === 'settings-image' ? 'image' : scene === 'settings-config' ? 'config' : null
+      scene === 'settings-image' || scene === 'settings-jina' ? 'image' : scene === 'settings-config' ? 'config' : scene === 'settings-hymt2' ? 'translation' : null
     );
     setShowWelcomeWizard(false);
     setShowSettings(
       scene === 'settings'
+      || scene === 'safe-area-return'
+      || scene === 'settings-keyboard'
       || scene === 'settings-image'
+      || scene === 'settings-jina'
       || scene === 'settings-config'
       || scene === 'settings-qr'
       || scene === 'settings-qr-import'
       || scene === 'settings-config-roundtrip'
-      || scene === 'settings-hunyuan-output'
+      || scene === 'settings-hymt2'
       || scene === 'settings-local'
       || scene === 'settings-model-packs'
       || scene === 'settings-model-pack-install'
@@ -1268,24 +1271,13 @@ function AppContent() {
       return;
     }
 
-    if (scene === 'settings-hunyuan-output') {
+    if (scene === 'settings-hymt2') {
       setSettings(normalizeSettings({
         ...SMOKE_SETTINGS,
-        provider: 'custom',
-        endpoint: SILICONFLOW_ENDPOINT,
-        modelName: HUNYUAN_MT_MODEL,
-        apiKey: 'ios-smoke-hunyuan-key',
-        translation: {
-          outputMode: 'structured',
-        },
+        provider: 'custom', endpoint: 'https://openrouter.ai/api/v1',
+        modelName: 'tencent/hy-mt2-7b', apiKey: 'ios-smoke-mt2-key',
+        translation: { outputMode: 'plain' },
       }));
-      setSourceLang('ja');
-      setTargetLang('en');
-      setTextMode('translation');
-      setImageMode('vlm');
-      setResultFormat('plain');
-      setSourceText('Hunyuan-MT output mode');
-      setTargetText('Hunyuan-MT should use plain output.');
       return;
     }
 
@@ -1602,7 +1594,7 @@ function AppContent() {
         },
         speechRecognition: {
           ...SMOKE_SETTINGS.speechRecognition,
-          provider: 'siliconflow',
+          provider: 'openai-compatible',
           endpoint: 'https://ios-smoke-speech.example.test/v1',
           modelName: 'ios-smoke-speech-roundtrip',
           apiKey: 'ios-smoke-speech-key',
@@ -2079,7 +2071,7 @@ function AppContent() {
         const transcript = await transcribeAudioFile(audioFile, smokeSettings);
         const checks = {
           transcript: transcript.trim() === expectedTranscript,
-          provider: smokeSettings.speechRecognition.provider === 'siliconflow',
+          provider: smokeSettings.speechRecognition.provider === 'openai-compatible',
           model: smokeSettings.speechRecognition.modelName === 'tabitomo-native-speech-smoke',
         };
         const failed = Object.entries(checks)
@@ -2440,12 +2432,6 @@ function AppContent() {
     return hasText && hasGeneralAISettings(settings);
   }, [settings, sourceText, textMode]);
 
-  const ResultIcon = textMode === 'qa'
-    ? MessageCircle
-    : textMode === 'explanation'
-      ? ScanText
-      : Sparkles;
-
   const openSettingsAt = useCallback((target: SettingsJumpId | null = null) => {
     setSettingsInitialJumpId(target);
     setShowSettings(true);
@@ -2457,7 +2443,7 @@ function AppContent() {
         title: 'Translation setup needed',
         message: 'Choose a provider in Settings to start translating.',
         actionLabel: 'Open Settings',
-        target: 'translation',
+        target: settings.provider === 'custom' ? 'translation' : 'general',
       };
     }
 
@@ -2476,6 +2462,7 @@ function AppContent() {
   const activeConfigGuidance = configGuidanceOverride ?? textConfigGuidance;
 
   const showError = (message: string) => {
+    setWorkspaceError(message);
     setNotice(message);
     Alert.alert('tabitomo', message);
   };
@@ -2483,6 +2470,8 @@ function AppContent() {
   const handleSaveSettings = async (nextSettings: AISettings) => {
     const normalized = normalizeSettings(nextSettings);
     const persisted = await saveMobileSettings(normalized);
+    cancelWorkspaceRequest();
+    translationCacheRef.current.clear();
     setSettings(persisted);
     setShowSettings(false);
     setSettingsInitialJumpId(null);
@@ -2515,7 +2504,7 @@ function AppContent() {
 
   useEffect(() => {
     setConfigGuidanceOverride(null);
-  }, [imageMode, settings, textMode]);
+  }, [settings, textMode]);
 
   const handleSelectTextMode = (nextMode: TextMode) => {
     if (nextMode === textMode) {
@@ -2528,13 +2517,7 @@ function AppContent() {
       setTargetLang(sourceLang);
     }
 
-    textActionAbortRef.current?.abort();
-    textActionAbortRef.current = null;
-    if (textAutoRunTimerRef.current) {
-      clearTimeout(textAutoRunTimerRef.current);
-      textAutoRunTimerRef.current = null;
-    }
-    lastAutoTextRunKeyRef.current = null;
+    cancelWorkspaceRequest();
     setTextMode(nextMode);
     setTargetText('');
     setResultFormat(nextMode === 'translation' ? 'plain' : 'markdown');
@@ -2620,7 +2603,7 @@ function AppContent() {
       return;
     }
 
-    if (sourceLang === targetLang) {
+    if (mode === 'translation' && sourceLang === targetLang) {
       if (options.silent) {
         return;
       }
@@ -2633,7 +2616,7 @@ function AppContent() {
         return;
       }
       showError('Configure General AI or Translation settings first.');
-      openSettingsAt('translation');
+      openSettingsAt(settings.provider === 'custom' ? 'translation' : 'general');
       return;
     }
 
@@ -2660,6 +2643,7 @@ function AppContent() {
 
     try {
       setBusyState('translating');
+      setWorkspaceError(null);
       setNotice(null);
       setTargetText('');
       setFuriganaTokens(null);
@@ -2702,11 +2686,12 @@ function AppContent() {
         setTargetText(streamedText);
       }
     } catch (error) {
-      if (isAbortError(error)) {
+      if (abortController.signal.aborted || isAbortError(error)) {
         return;
       }
       const message = error instanceof Error ? error.message : `${textModeTitle(mode)} failed.`;
       if (options.silent) {
+        setWorkspaceError(message);
         setNotice(message);
       } else {
         showError(message);
@@ -2721,6 +2706,7 @@ function AppContent() {
 
   useEffect(() => () => {
     textActionAbortRef.current?.abort();
+    imageActionAbortRef.current?.abort();
     if (textAutoRunTimerRef.current) {
       clearTimeout(textAutoRunTimerRef.current);
       textAutoRunTimerRef.current = null;
@@ -2752,7 +2738,7 @@ function AppContent() {
       return;
     }
 
-    if (sourceLang === targetLang) {
+    if (textMode === 'translation' && sourceLang === targetLang) {
       return;
     }
 
@@ -2800,10 +2786,16 @@ function AppContent() {
   ]);
 
   const handleSwapLanguages = () => {
+    cancelWorkspaceRequest();
     setSourceLang(targetLang);
     setTargetLang(sourceLang);
-    setSourceText(targetText);
-    setTargetText(sourceText);
+    if (!imageUri) {
+      setSourceText(targetText);
+      setTargetText(sourceText);
+    } else {
+      setTargetText('');
+      setOverlayItems([]);
+    }
   };
 
   const handleSpeak = async () => {
@@ -2812,9 +2804,17 @@ function AppContent() {
       return;
     }
     await Speech.stop();
+    if (isSpeaking) {
+      setIsSpeaking(false);
+      return;
+    }
+    setIsSpeaking(true);
     Speech.speak(text, {
       language: targetText ? targetLang : sourceLang,
       rate: 0.95,
+      onDone: () => setIsSpeaking(false),
+      onStopped: () => setIsSpeaking(false),
+      onError: () => { setIsSpeaking(false); showError('Could not play audio. Try again.'); },
     });
   };
 
@@ -2822,7 +2822,12 @@ function AppContent() {
     if (!targetText.trim()) {
       return;
     }
-    await Clipboard.setStringAsync(targetText);
+    try {
+      await Clipboard.setStringAsync(targetText);
+    } catch {
+      showError('Could not copy the result. Try again.');
+      return;
+    }
     if (resultCopyResetTimerRef.current) {
       clearTimeout(resultCopyResetTimerRef.current);
     }
@@ -2839,6 +2844,7 @@ function AppContent() {
       const permission = await requestRecordingPermissionsAsync();
       if (!permission.granted) {
         showError('Microphone permission is required for voice translation.');
+        setBusyState('idle');
         return false;
       }
 
@@ -2859,6 +2865,10 @@ function AppContent() {
   };
 
   const handleStartRecording = async () => {
+    if (recordingStartRef.current || isBusy(busyState)) return;
+    recordingStartRef.current = true;
+    Keyboard.dismiss();
+    try {
     if (settings.speechRecognition.provider === 'local') {
       if (Platform.OS !== 'ios') {
         showError('Local ASR currently requires an iOS native build.');
@@ -2949,7 +2959,18 @@ function AppContent() {
     }
 
     localRecordingPackRef.current = null;
+    if (!hasProviderConnection(getSpeechConnection(settings))) {
+      showError('Configure a speech endpoint, model, and API key before recording.');
+      openSettingsAt('speech');
+      return;
+    }
     await startFileRecording();
+    } catch (error) {
+      showError(error instanceof Error ? error.message : 'Could not start speech recognition.');
+      setBusyState('idle');
+    } finally {
+      recordingStartRef.current = false;
+    }
   };
 
   const handleStopRecording = async () => {
@@ -3036,28 +3057,9 @@ function AppContent() {
   };
 
   const handlePickImage = async (source: 'camera' | 'library') => {
-    if (textMode !== 'translation') {
-      setTextMode('translation');
-    }
-
-    if (!isCloudImageConfigured(settings, imageMode)) {
-      const guidance: ConfigGuidance = imageMode === 'ocr'
-        ? {
-            title: 'OCR Service Not Configured',
-            message: 'Add a cloud OCR provider or choose Local PP-OCR on iOS for native Vision OCR.',
-            actionLabel: 'Open Settings',
-            target: 'image',
-          }
-        : {
-            title: 'VLM Service Not Configured',
-            message: 'Add General AI or custom VLM settings before translating images directly.',
-            actionLabel: 'Open Settings',
-            target: 'general',
-          };
-      setConfigGuidanceOverride(guidance);
-      setNotice(guidance.message);
-      return;
-    }
+    cancelWorkspaceRequest();
+    const pickerController = new AbortController();
+    imageActionAbortRef.current = pickerController;
 
     try {
       setBusyState('image');
@@ -3075,22 +3077,27 @@ function AppContent() {
             base64: false,
           });
 
+      if (pickerController.signal.aborted) return;
       if (result.canceled || !result.assets[0]) {
         setBusyState('idle');
         return;
       }
 
+      const prepared = await buildImageDataUri(result.assets[0]);
+      if (pickerController.signal.aborted) return;
       resetImageWorkspace();
       const languageContext = enterImageLanguageContext();
-      const prepared = await buildImageDataUri(result.assets[0]);
       setImageUri(prepared.uri);
       setImageBase64(prepared.dataUri);
       setImageSize(prepared.size);
       await handleProcessImage(prepared.dataUri, prepared.uri, languageContext);
     } catch (error) {
-      showError(error instanceof Error ? error.message : 'Image translation failed.');
+      if (!pickerController.signal.aborted) showError(error instanceof Error ? error.message : 'Image translation failed.');
     } finally {
-      setBusyState('idle');
+      if (imageActionAbortRef.current === pickerController) {
+        imageActionAbortRef.current = null;
+        setBusyState('idle');
+      }
     }
   };
 
@@ -3107,7 +3114,8 @@ function AppContent() {
   const handleProcessImage = async (
     dataUri = imageBase64,
     nativeImageUri = imageUri,
-    languageContext?: { source: LanguageCode; target: LanguageCode }
+    languageContext?: { source: LanguageCode; target: LanguageCode },
+    mode: ImageMode = imageMode
   ) => {
     if (!dataUri) {
       return;
@@ -3125,93 +3133,123 @@ function AppContent() {
       return;
     }
 
+    cancelWorkspaceRequest();
+    const controller = new AbortController();
+    imageActionAbortRef.current = controller;
+    const signal = controller.signal;
+    setBusyState('image');
+    setNotice(null);
+    setConfigGuidanceOverride(null);
     setOverlayItems([]);
     setTargetText('');
     setFuriganaTokens(null);
-
-    const vlmUsesLocalOCR = imageMode === 'vlm'
-      && !settings.vlm.useGeneralAI
-      && !settings.vlm.useCustom
-      && !settings.imageOCR.useGeneralAI
-      && settings.imageOCR.provider === 'local-ppocr';
-
-    if (imageMode === 'vlm' && !vlmUsesLocalOCR) {
-      setResultFormat('markdown');
-      let streamedText = '';
-      for await (const chunk of streamTranslateImageWithVLM(dataUri, processSourceLang, processTargetLang, settings)) {
-        streamedText += chunk;
-        setTargetText(streamedText);
+    setSourceText('');
+    try {
+      if (!isCloudImageConfigured(settings, mode)) {
+        setConfigGuidanceOverride({
+          title: mode === 'ocr' ? 'OCR setup needed' : 'Vision translation setup needed',
+          message: mode === 'ocr' ? 'Choose local OCR or connect an OCR provider in Settings.' : 'Connect an image-capable model, or switch to OCR.',
+          actionLabel: 'Open Settings',
+          target: 'image',
+        });
+        return;
       }
-      return;
-    }
+      const vlmUsesLocalOCR = mode === 'vlm'
+        && !settings.vlm.useGeneralAI
+        && !settings.vlm.useCustom
+        && !settings.imageOCR.useGeneralAI
+        && settings.imageOCR.provider === 'local-ppocr';
 
-    let ocrTexts: OCRTextLocation[];
-    if (settings.imageOCR.provider === 'local-ppocr' && !settings.imageOCR.useGeneralAI) {
-      if (Platform.OS !== 'ios') {
-        throw new Error('Local PP-OCR currently requires the native iOS build. Use cloud OCR on this platform.');
-      }
-      if (!nativeImageUri) {
-        throw new Error('A local image file is required for native OCR.');
+      if (mode === 'vlm' && !vlmUsesLocalOCR) {
+        setResultFormat('markdown');
+        let streamedText = '';
+        for await (const chunk of streamTranslateImageWithVLM(dataUri, processSourceLang, processTargetLang, settings, signal)) {
+          if (signal.aborted) return;
+          streamedText += chunk;
+          setTargetText(streamedText);
+        }
+        return;
       }
 
-      const installed = await loadInstalledModelPacks();
-      const pack = getReadyInstalledModelPackById(installed, 'ppocr-v6-small');
-      if (pack) {
-        try {
-          const result = await recognizeTextWithNativePPOCRAsync(nativeImageUri, 'ppocr-v6-small', pack.rootUri);
-          ocrTexts = result.items;
-          setNotice(`Text recognized with ${pack.label || 'PP-OCR v6 Small'}.`);
-        } catch {
-          setNotice('PP-OCR could not process this image. Apple Vision was used instead.');
+      let ocrTexts: OCRTextLocation[];
+      if (settings.imageOCR.provider === 'local-ppocr' && !settings.imageOCR.useGeneralAI) {
+        if (Platform.OS !== 'ios') {
+          throw new Error('Local PP-OCR currently requires the native iOS build. Use cloud OCR on this platform.');
+        }
+        if (!nativeImageUri) {
+          throw new Error('A local image file is required for native OCR.');
+        }
+
+        const installed = await loadInstalledModelPacks();
+        const pack = getReadyInstalledModelPackById(installed, 'ppocr-v6-small');
+        if (pack) {
+          try {
+            const result = await recognizeTextWithNativePPOCRAsync(nativeImageUri, 'ppocr-v6-small', pack.rootUri);
+            if (signal.aborted) return;
+            ocrTexts = result.items;
+            setNotice(`Text recognized with ${pack.label || 'PP-OCR v6 Small'}.`);
+          } catch {
+            if (signal.aborted) return;
+            setNotice('PP-OCR could not process this image. Apple Vision was used instead.');
+            ocrTexts = await recognizeTextInImageAsync(
+              nativeImageUri,
+              nativeVisionOCRLanguages(processSourceLang)
+            );
+          }
+        } else {
+          setNotice('PP-OCR is not ready. Apple Vision was used instead.');
           ocrTexts = await recognizeTextInImageAsync(
             nativeImageUri,
             nativeVisionOCRLanguages(processSourceLang)
           );
         }
       } else {
-        setNotice('PP-OCR is not ready. Apple Vision was used instead.');
-        ocrTexts = await recognizeTextInImageAsync(
-          nativeImageUri,
-          nativeVisionOCRLanguages(processSourceLang)
-        );
+        ocrTexts = await performOCR(dataUri, settings, signal);
       }
-    } else {
-      ocrTexts = await performOCR(dataUri, settings);
+
+      if (signal.aborted) return;
+      if (!ocrTexts.length) {
+        setNotice('No readable text found.');
+        return;
+      }
+
+      const translatedItems = await Promise.all(
+        ocrTexts.map(async (item, index) => {
+          const translation = await translateText(item.text, processSourceLang, processTargetLang, settings, signal);
+          return {
+            id: `${index}-${item.text.slice(0, 10)}`,
+            source: item.text,
+            translation,
+            location: item.location,
+            rotate_rect: item.rotate_rect,
+          };
+        })
+      );
+
+      if (signal.aborted) return;
+      setOverlayItems(vlmUsesLocalOCR ? [] : translatedItems);
+      setSourceText(ocrTexts.map((item) => item.text).join('\n'));
+      setResultFormat('plain');
+      setFuriganaTokens(null);
+      setTargetText(translatedItems.map((item) => item.translation).join('\n'));
+    } catch (error) {
+      if (!signal.aborted && !isAbortError(error)) showError(error instanceof Error ? error.message : 'Image translation failed.');
+    } finally {
+      if (imageActionAbortRef.current === controller) {
+        imageActionAbortRef.current = null;
+        setBusyState('idle');
+      }
     }
-
-    if (!ocrTexts.length) {
-      setNotice('No readable text found.');
-      return;
-    }
-
-    const translatedItems = await Promise.all(
-      ocrTexts.map(async (item, index) => {
-        const translation = await translateText(item.text, processSourceLang, processTargetLang, settings);
-        return {
-          id: `${index}-${item.text.slice(0, 10)}`,
-          source: item.text,
-          translation,
-          location: item.location,
-          rotate_rect: item.rotate_rect,
-        };
-      })
-    );
-
-    setOverlayItems(vlmUsesLocalOCR ? [] : translatedItems);
-    setSourceText(ocrTexts.map((item) => item.text).join('\n'));
-    setResultFormat('plain');
-    setFuriganaTokens(null);
-    setTargetText(translatedItems.map((item) => item.translation).join('\n'));
   };
 
+  const handleSelectImageMode = (mode: ImageMode) => {
+    setImageMode(mode);
+    if (imageBase64) void handleProcessImage(imageBase64, imageUri, undefined, mode);
+  };
+
+
   const handleClear = () => {
-    textActionAbortRef.current?.abort();
-    textActionAbortRef.current = null;
-    if (textAutoRunTimerRef.current) {
-      clearTimeout(textAutoRunTimerRef.current);
-      textAutoRunTimerRef.current = null;
-    }
-    lastAutoTextRunKeyRef.current = null;
+    cancelWorkspaceRequest();
     setSourceText('');
     setTargetText('');
     setImageUri(null);
@@ -3225,6 +3263,9 @@ function AppContent() {
   };
 
   const selectLanguage = (code: LanguageCode) => {
+    cancelWorkspaceRequest();
+    setTargetText('');
+    setOverlayItems([]);
     if (languagePickerTarget === 'source') {
       setSourceLang(code);
     }
@@ -3237,13 +3278,13 @@ function AppContent() {
   if (!isReady) {
     return (
       <AppThemeContext.Provider value={themeContext}>
-        <LinearGradient colors={theme.gradient} style={styles.root}>
+        <View style={[styles.root, { backgroundColor: theme.field }]}>
           <StatusBar style={theme.statusBarStyle} />
           <View style={styles.loading}>
             <ActivityIndicator size="large" color={theme.accent} />
             <Text style={styles.loadingText}>Loading tabitomo...</Text>
           </View>
-        </LinearGradient>
+        </View>
       </AppThemeContext.Provider>
     );
   }
@@ -3252,16 +3293,17 @@ function AppContent() {
   const needsSetupAttention = !isTextTranslationConfigured(settings);
 
   return (
+    <SafeAreaAuditContext.Provider value={smokeScene}>
     <AppThemeContext.Provider value={themeContext}>
-      <LinearGradient colors={theme.gradient} style={styles.root}>
+      <View style={[styles.root, { backgroundColor: theme.field }]}>
           <StatusBar style={theme.statusBarStyle} />
           <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+          <SafeAreaLayout name="workspace" topSpacing={8} keyboardAware>
             <View style={styles.appShell}>
               <View style={[styles.header, keyboardVisible && styles.headerEditing]}>
                 <View style={styles.brandRow}>
                   <Image source={BUDDY_IMAGE} style={[styles.brandIcon, keyboardVisible && styles.brandIconEditing]} />
-                  <View><Text style={[styles.brand, keyboardVisible && styles.brandEditing]}>tabitomo</Text>{!keyboardVisible && <Text style={styles.subtitle}>A little help, wherever you go.</Text>}</View>
+                  <Text style={[styles.brand, keyboardVisible && styles.brandEditing]}>tabitomo</Text>
                 </View>
                 <NativeMaterial theme={theme} style={styles.headerSettingsMaterial} interactive>
                 <Pressable
@@ -3280,21 +3322,21 @@ function AppContent() {
                 </NativeMaterial>
               </View>
 
-              <View style={[styles.appBody, isCompactViewport && styles.appBodyCompact, { paddingBottom: keyboardVisible ? 8 : (isCompactViewport ? 10 : 12) + insets.bottom }]}>
-                {!keyboardVisible && <TextModeSwitcher mode={textMode} onChange={handleSelectTextMode} />}
+              <View style={[styles.appBody, isCompactViewport && styles.appBodyCompact, { paddingBottom: keyboardVisible ? 8 : (isCompactViewport ? 10 : 12) }]}>
+                {!keyboardVisible && <View pointerEvents={isVoiceRecording || busyState === 'transcribing' ? 'none' : 'auto'} accessibilityElementsHidden={isVoiceRecording}><TextModeSwitcher mode={textMode} onChange={handleSelectTextMode} /></View>}
                 <NativeMaterial theme={theme} style={[styles.languageBar, usesTargetOnlyLanguageBar && styles.languageBarTargetOnly]}>
                   {usesTargetOnlyLanguageBar ? (
                     <View style={styles.targetLanguageOnly}>
                       <Text numberOfLines={1} style={styles.languageBarLabel}>Target Language</Text>
                       <View style={styles.targetLanguageButtonRow}>
-                        <LanguageButton code={targetLang} align="right" onPress={() => setLanguagePickerTarget('target')} />
+                        <LanguageButton disabled={isVoiceRecording || busyState === 'transcribing'} code={targetLang} align="right" onPress={() => setLanguagePickerTarget('target')} />
                       </View>
                     </View>
                   ) : (
                     <>
-                      <LanguageButton code={sourceLang} onPress={() => setLanguagePickerTarget('source')} />
-                      <IconButton icon={ArrowLeftRight} label="Swap" onPress={handleSwapLanguages} compact quiet />
-                      <LanguageButton code={targetLang} onPress={() => setLanguagePickerTarget('target')} />
+                      <LanguageButton disabled={isVoiceRecording || busyState === 'transcribing'} code={sourceLang} onPress={() => setLanguagePickerTarget('source')} />
+                      <IconButton icon={ArrowLeftRight} label="Swap" onPress={handleSwapLanguages} disabled={isVoiceRecording || busyState === 'transcribing'} compact quiet />
+                      <LanguageButton disabled={isVoiceRecording || busyState === 'transcribing'} code={targetLang} onPress={() => setLanguagePickerTarget('target')} />
                     </>
                   )}
                 </NativeMaterial>
@@ -3310,15 +3352,13 @@ function AppContent() {
                   <View style={[styles.panel, isCompactViewport && styles.panelCompact, sourceInputFocused && styles.panelFocused]}>
                     <View style={styles.panelHeader}>
                       <View style={styles.panelTitleRow}>
-                        <Languages size={16} color={theme.mutedText} strokeWidth={1.8} />
-                        <Text style={styles.panelTitle}>Source</Text>
+                        <Text style={styles.panelTitle}>{imageUri ? 'Photo' : textMode === 'qa' ? 'Your question' : 'Source'}</Text>
                       </View>
-                      <Pressable accessibilityRole="button" accessibilityLabel="Clear" disabled={!sourceText && !imageUri} onPress={handleClear} style={({ pressed }) => [styles.clearButton, (!sourceText && !imageUri) && styles.disabled, pressed && styles.buttonPressed]}>
-                        <Eraser size={16} color={theme.mutedText} strokeWidth={1.8} />
+                      <Pressable accessibilityRole="button" accessibilityLabel="Clear" disabled={isVoiceRecording || busyState === 'transcribing' || (!sourceText && !imageUri)} onPress={handleClear} style={({ pressed }) => [styles.clearButton, (isVoiceRecording || busyState === 'transcribing' || (!sourceText && !imageUri)) && styles.disabled, pressed && styles.buttonPressed]}>
                         <Text style={styles.clearButtonText}>Clear</Text>
                       </Pressable>
                     </View>
-                    <View
+                    {!imageUri && <View
                       style={[
                         styles.sourceInputFrame,
                         isCompactViewport && styles.sourceInputFrameCompact,
@@ -3329,7 +3369,8 @@ function AppContent() {
                         ref={sourceInputRef}
                         accessibilityLabel="Source text"
                         value={sourceText}
-                        onChangeText={setSourceText}
+                        onChangeText={handleEditSource}
+                        editable={!isVoiceRecording && busyState !== 'transcribing'}
                         multiline
                         placeholder={textModePlaceholder(textMode)}
                         placeholderTextColor={theme.sourcePlaceholder}
@@ -3339,7 +3380,8 @@ function AppContent() {
                         style={[styles.sourceInput, isCompactViewport && styles.sourceInputCompact, isNarrowViewport && styles.sourceInputNarrow]}
                       />
 
-                    </View>
+                    </View>}
+                    {imageUri && !!sourceText && <Text selectable style={styles.markdownParagraph}>{sourceText}</Text>}
                   </View>
 
                   {imageUri && (
@@ -3352,16 +3394,9 @@ function AppContent() {
                       />
                       <View style={styles.imageToolbar}>
                         <View style={styles.imageModeBar}>
-                          <SegmentButton label="VLM" active={imageMode === 'vlm'} onPress={() => setImageMode('vlm')} />
-                          <SegmentButton label={settings.imageOCR.useGeneralAI || settings.imageOCR.provider === 'custom' ? 'OCR text' : 'OCR overlay'} active={imageMode === 'ocr'} onPress={() => setImageMode('ocr')} />
+                          <SegmentButton label="Vision translation" active={imageMode === 'vlm'} onPress={() => handleSelectImageMode('vlm')} />
+                          <SegmentButton label={supportsOCROverlay(settings.imageOCR) ? 'OCR overlay' : 'OCR text'} active={imageMode === 'ocr'} onPress={() => handleSelectImageMode('ocr')} />
                         </View>
-                        <IconButton
-                          icon={ScanText}
-                          label="Rerun image"
-                          onPress={() => handleProcessImage()}
-                          disabled={!imageBase64 || isBusy(busyState)}
-                          compact
-                        />
                       </View>
                     </>
                   )}
@@ -3369,17 +3404,22 @@ function AppContent() {
                   <View style={[styles.resultPanel, isNarrowViewport && styles.resultPanelNarrow]}>
                     <View style={styles.panelHeader}>
                       <View style={styles.panelTitleRow}>
-                        <ResultIcon size={16} color={theme.accentStrong} strokeWidth={1.8} />
                         <Text style={styles.panelTitle}>{textModeTitle(textMode)}</Text>
                       </View>
                       <Text style={styles.panelMeta}>{SUPPORTED_LANGUAGES[targetLang]}</Text>
                     </View>
+                    {workspaceError && <Text accessibilityRole="alert" style={styles.configStatus}>{workspaceError}</Text>}
                     {targetText ? (
                       resultFormat === 'markdown'
                         ? <MarkdownText text={targetText} />
                         : furiganaTokens
                           ? <FuriganaText tokens={furiganaTokens} />
                           : <Text style={styles.resultText}>{targetText}</Text>
+                    ) : busyState === 'translating' || busyState === 'image' ? (
+                      <View accessibilityLiveRegion="polite" style={styles.resultEmpty}>
+                        <ActivityIndicator size="large" color={theme.accent} />
+                        <Text style={styles.resultEmptyTitle}>{busyState === 'image' ? 'Reading your photo…' : textModeBusyText(textMode)}</Text>
+                      </View>
                     ) : activeConfigGuidance ? (
                       <ConfigGuidanceCard
                         guidance={activeConfigGuidance}
@@ -3387,15 +3427,14 @@ function AppContent() {
                       />
                     ) : (
                       <View style={[styles.resultEmpty, isNarrowViewport && styles.resultEmptyNarrow]}>
-                        <View style={styles.resultEmptyIcon}><Sparkles size={25} color={theme.accentStrong} strokeWidth={1.5} /></View>
-                        <Text style={styles.resultEmptyTitle}>{textMode === 'qa' ? 'A little local knowledge.' : textMode === 'explanation' ? 'Make sense of something new.' : 'Good conversations start here.'}</Text>
                         <Text style={styles.emptyText}>{textModeEmptyText(textMode)}</Text>
                       </View>
                     )}
                     {isFuriganaLoading && <Text style={styles.furiganaStatus}>Adding furigana...</Text>}
+                    {!!targetText && (busyState === 'translating' || busyState === 'image') && <View accessibilityLiveRegion="polite" style={styles.resultProgress}><ActivityIndicator size="small" color={theme.accentStrong} /><Text style={styles.settingsHelp}>Generating…</Text></View>}
                     {!!targetText && (
                       <View style={styles.resultActions}>
-                        <IconButton icon={Volume2} label="Listen" onPress={handleSpeak} compact />
+                        <IconButton icon={isSpeaking ? MicOff : Volume2} label={isSpeaking ? 'Stop audio' : 'Listen'} onPress={handleSpeak} compact disabled={busyState === 'translating' || busyState === 'image'} />
                         <IconButton
                           icon={resultCopied ? Check : Copy}
                           label={resultCopied ? 'Copied' : 'Copy'}
@@ -3410,13 +3449,13 @@ function AppContent() {
 
                 {notice && <Text accessibilityLiveRegion="polite" style={styles.notice}>{notice}</Text>}
                 <NativeMaterial theme={theme} style={styles.inputDock}>
-                      <View style={[styles.sourceToolbar]}>
+                      <View style={[styles.sourceToolbar, usesLargeText && styles.sourceToolbarLargeText]}>
                         <View style={[styles.sourceToolbarGroup, isCompactViewport && styles.sourceToolbarGroupCompact]}>
                           <IconButton
                             icon={isVoiceRecording ? MicOff : Mic}
                             label={isVoiceRecording ? 'Stop' : 'Speak'}
                             onPress={isVoiceRecording ? handleStopRecording : handleStartRecording}
-                            disabled={busyState === 'translating' || busyState === 'image' || busyState === 'transcribing'}
+                            disabled={!!imageUri || busyState === 'translating' || busyState === 'image' || busyState === 'transcribing'}
                             emphasized={isVoiceRecording}
                             compact
                             quiet
@@ -3444,28 +3483,27 @@ function AppContent() {
                         <Pressable
                           accessibilityRole="button"
                           accessibilityLabel={textModeActionLabel(textMode)}
-                          onPress={() => { actionFeedback(); void handleRunTextMode(); }}
-                          disabled={!canRunTextMode || isBusy(busyState)}
-                          style={({ pressed }) => [styles.translateButton, (!canRunTextMode || isBusy(busyState)) && styles.translateButtonDisabled, pressed && styles.buttonPressed]}
+                          onPress={() => { actionFeedback(); Keyboard.dismiss(); if (imageBase64) void handleProcessImage(); else void handleRunTextMode(); }}
+                          disabled={(!imageBase64 && !canRunTextMode) || isBusy(busyState)}
+                          accessibilityState={{ disabled: (!imageBase64 && !canRunTextMode) || isBusy(busyState), busy: isBusy(busyState) }}
+                          style={({ pressed }) => [styles.translateButton, usesLargeText && styles.translateButtonLargeText, ((!imageBase64 && !canRunTextMode) || isBusy(busyState)) && styles.translateButtonDisabled, pressed && styles.buttonPressed]}
                         >
-                          <LinearGradient pointerEvents="none" colors={[theme.accent, '#4338ca']} style={styles.translateButtonFill} />
                           <Text style={styles.translateButtonText}>{textModeActionLabel(textMode)}</Text>
-                          <ArrowRight size={17} color={theme.inverseText} strokeWidth={2} />
                         </Pressable>
                       </View>
                 </NativeMaterial>
               </View>
             </View>
 
-            {isBusy(busyState) && (
-              <View style={styles.busyOverlay}>
+            {(busyState === 'recording' || busyState === 'transcribing') && (
+              <View pointerEvents="none" accessibilityLiveRegion="polite" style={styles.busyOverlay}>
                 <ActivityIndicator color={theme.inverseText} />
                 <Text style={styles.busyText}>
-                  {busyState === 'recording' ? 'Recording...' : busyState === 'transcribing' ? 'Transcribing...' : busyState === 'image' ? 'Reading image...' : textModeBusyText(textMode)}
+                  {busyState === 'recording' ? 'Recording...' : 'Transcribing...'}
                 </Text>
               </View>
             )}
-        </SafeAreaView>
+        </SafeAreaLayout>
           </KeyboardAvoidingView>
 
         <LanguagePicker
@@ -3491,8 +3529,6 @@ function AppContent() {
               ? 'qr-import'
               : smokeScene === 'settings-config-roundtrip'
                 ? 'config-roundtrip'
-                : smokeScene === 'settings-hunyuan-output'
-                  ? 'hunyuan-output'
                   : smokeScene === 'settings-local'
                     ? 'local-runtime'
                     : smokeScene === 'settings-model-packs'
@@ -3541,8 +3577,9 @@ function AppContent() {
           items={overlayItems}
           onClose={() => setShowImageLightbox(false)}
         />
-        </LinearGradient>
+      </View>
     </AppThemeContext.Provider>
+    </SafeAreaAuditContext.Provider>
   );
 }
 
@@ -3597,12 +3634,12 @@ function ConfigGuidanceCard({
   guidance: ConfigGuidance;
   onPress: () => void;
 }) {
-  const { styles, theme } = useAppTheme();
+  const { styles } = useAppTheme();
   return (
     <View style={styles.configGuidanceCard}>
       <View style={styles.configGuidanceCopy}>
         <Text style={styles.configGuidanceTitle}>{guidance.title}</Text>
-        <Text numberOfLines={2} style={styles.configGuidanceText}>{guidance.message}</Text>
+        <Text style={styles.configGuidanceText}>{guidance.message}</Text>
       </View>
       <Pressable
         accessibilityRole="button"
@@ -3613,20 +3650,22 @@ function ConfigGuidanceCard({
           pressed && styles.buttonPressed,
         ]}
       >
-        <Settings size={16} color={theme.inverseText} strokeWidth={2.5} />
+        <Text style={styles.configGuidanceButtonText}>{guidance.actionLabel}</Text>
       </Pressable>
     </View>
   );
 }
 
-function LanguageButton({ code, onPress, align = 'center' }: { code: LanguageCode; onPress: () => void; align?: 'center' | 'right' }) {
+function LanguageButton({ code, onPress, disabled = false, align = 'center' }: { code: LanguageCode; onPress: () => void; disabled?: boolean; align?: 'center' | 'right' }) {
   const { styles, theme } = useAppTheme();
   const label = `${SUPPORTED_LANGUAGES[code]} language`;
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
-      style={({ pressed }) => [styles.languageButton, align === 'right' && styles.languageButtonRight, pressed && styles.buttonPressed]}
+      disabled={disabled}
+      accessibilityState={{ disabled }}
+      style={({ pressed }) => [styles.languageButton, disabled && styles.disabled, align === 'right' && styles.languageButtonRight, pressed && styles.buttonPressed]}
       onPress={() => { selectionFeedback(); onPress(); }}
     >
       <Text numberOfLines={1} style={styles.languageName}>{SUPPORTED_LANGUAGES[code]}</Text>
@@ -3652,15 +3691,16 @@ function SegmentButton({ label, active, onPress }: { label: string; active: bool
 
 function TextModeSwitcher({ mode, onChange }: { mode: TextMode; onChange: (mode: TextMode) => void }) {
   const { styles, theme } = useAppTheme();
-  if (Platform.OS !== 'ios') return <PortableTextModeSwitcher mode={mode} onChange={onChange} />;
+  const { fontScale } = useWindowDimensions();
+  if (Platform.OS !== 'ios' || fontScale > 1.3) return <PortableTextModeSwitcher mode={mode} onChange={onChange} />;
   const modes: TextMode[] = ['translation', 'explanation', 'qa'];
   return <SegmentedControl
     accessibilityLabel="Assistant mode"
     values={['Translate', 'Explain', 'Q&A']}
     selectedIndex={modes.indexOf(mode)}
     appearance={theme.name}
-    fontStyle={{ fontSize: 14, color: theme.mutedText, fontWeight: '500' }}
-    activeFontStyle={{ fontSize: 14, color: theme.accentStrong, fontWeight: '600' }}
+    fontStyle={{ fontSize: 14 * fontScale, color: theme.mutedText, fontWeight: '500' }}
+    activeFontStyle={{ fontSize: 14 * fontScale, color: theme.accentStrong, fontWeight: '600' }}
     style={styles.nativeModeControl}
     onChange={(event) => { selectionFeedback(); onChange(modes[event.nativeEvent.selectedSegmentIndex]); }}
   />;
@@ -3669,6 +3709,8 @@ function TextModeSwitcher({ mode, onChange }: { mode: TextMode; onChange: (mode:
 function PortableTextModeSwitcher({ mode, onChange }: { mode: TextMode; onChange: (mode: TextMode) => void }) {
   const { styles, theme } = useAppTheme();
   const { reduceMotion } = useNativePreferences();
+  const { fontScale } = useWindowDimensions();
+  const usesLargeText = fontScale > 1.3;
   const [trackWidth, setTrackWidth] = useState(0);
   const modeIndex = mode === 'translation' ? 0 : mode === 'explanation' ? 1 : 2;
   const indicatorPosition = useRef(new Animated.Value(modeIndex)).current;
@@ -3702,9 +3744,9 @@ function PortableTextModeSwitcher({ mode, onChange }: { mode: TextMode; onChange
     <View
       accessibilityRole="tablist"
       onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}
-      style={styles.textModeBar}
+      style={[styles.textModeBar, usesLargeText && styles.textModeBarLargeText]}
     >
-      {trackWidth > 0 && (
+      {trackWidth > 0 && !usesLargeText && (
         <Animated.View
           style={[
             styles.textModeIndicator,
@@ -3717,7 +3759,6 @@ function PortableTextModeSwitcher({ mode, onChange }: { mode: TextMode; onChange
       )}
       {options.map((option) => {
         const active = option.mode === mode;
-        const Icon = option.icon;
         return (
           <Pressable
             accessibilityRole="tab"
@@ -3727,10 +3768,11 @@ function PortableTextModeSwitcher({ mode, onChange }: { mode: TextMode; onChange
             onPress={() => onChange(option.mode)}
             style={({ pressed }) => [
               styles.textModeButton,
+              usesLargeText && styles.textModeButtonLargeText,
+              usesLargeText && active && styles.choiceActive,
               pressed && styles.textModeButtonPressed,
             ]}
           >
-            <Icon size={16} color={active ? theme.accentStrong : theme.mutedText} strokeWidth={1.8} />
             <Text style={[styles.textModeButtonText, active && styles.textModeButtonTextActive]}>{option.label}</Text>
           </Pressable>
         );
@@ -3745,6 +3787,7 @@ type PopupPanelProps = {
   panelStyle: StyleProp<ViewStyle>;
   baseBottomPadding?: number;
   children: React.ReactNode;
+  dismissible?: boolean;
 };
 
 function PopupPanel(props: PopupPanelProps) {
@@ -3752,17 +3795,20 @@ function PopupPanel(props: PopupPanelProps) {
   return <AnimatedPopupPanel {...props} />;
 }
 
-function NativePopupPanel({ visible, onClose, panelStyle, children }: PopupPanelProps) {
+function NativePopupPanel({ visible, onClose, panelStyle, children, dismissible = true }: PopupPanelProps) {
   const { styles, theme } = useAppTheme();
-  const insets = useSafeAreaInsets();
   const { reduceMotion } = useNativePreferences();
-  return <Modal visible={visible} presentationStyle="pageSheet" animationType={reduceMotion ? 'none' : 'slide'} allowSwipeDismissal onRequestClose={onClose}>
-    <KeyboardAvoidingView behavior="padding" style={[styles.root, { backgroundColor: theme.field }]}>
-      <View accessibilityElementsHidden style={styles.sheetGrabber} />
-      <View accessibilityViewIsModal style={[panelStyle, styles.nativeSheetContent, { paddingBottom: Math.max(12, insets.bottom) }]}>
-        {children}
-      </View>
-    </KeyboardAvoidingView>
+  return <Modal visible={visible} presentationStyle="pageSheet" animationType={reduceMotion ? 'none' : 'slide'} allowSwipeDismissal={dismissible} onRequestClose={() => { if (dismissible) onClose(); }}>
+    <SafeAreaProvider>
+      <SheetKeyboardAvoidingView backgroundColor={theme.field}>
+        <SafeAreaLayout name="sheet" keyboardAware bottomSpacing={12} backgroundColor={theme.field}>
+          <View accessibilityElementsHidden style={styles.sheetGrabber} />
+          <View accessibilityViewIsModal style={[panelStyle, styles.nativeSheetContent]}>
+            {children}
+          </View>
+        </SafeAreaLayout>
+      </SheetKeyboardAvoidingView>
+    </SafeAreaProvider>
   </Modal>;
 }
 
@@ -3772,13 +3818,8 @@ function AnimatedPopupPanel({
   panelStyle,
   baseBottomPadding = 10,
   children,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  panelStyle: StyleProp<ViewStyle>;
-  baseBottomPadding?: number;
-  children: React.ReactNode;
-}) {
+  dismissible = true,
+}: PopupPanelProps) {
   const { styles } = useAppTheme();
   const { reduceMotion } = useNativePreferences();
   const insets = useSafeAreaInsets();
@@ -3864,10 +3905,12 @@ function AnimatedPopupPanel({
       animationType="none"
       hardwareAccelerated
       presentationStyle="overFullScreen"
-      onRequestClose={onClose}
+      onRequestClose={() => { if (dismissible) onClose(); }}
     >
       <View style={styles.languageModalRoot}>
-        <Animated.View style={[styles.languageModalBackdrop, { opacity: backdropOpacity }]} />
+        <Animated.View style={[styles.languageModalBackdrop, { opacity: backdropOpacity }]}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Dismiss panel" disabled={!dismissible} onPress={onClose} style={StyleSheet.absoluteFill} />
+        </Animated.View>
         <Animated.View
           style={[
             panelStyle,
@@ -3965,10 +4008,13 @@ function SetupWizard({
   const [configPayload, setConfigPayload] = useState('');
   const [configStatus, setConfigStatus] = useState<string | null>(null);
   const [isConfigBusy, setIsConfigBusy] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [showQrScanner, setShowQrScanner] = useState(false);
 
   useEffect(() => {
     if (visible) {
+      setSaveError(null);
       setStep(smokeInitialStep || 'choice');
       setConfigMode('general');
       setDraft(normalizeSettings(DEFAULT_SETTINGS));
@@ -4001,7 +4047,14 @@ function SetupWizard({
     : Boolean(hasProviderConnection(draft));
 
   const completeWithDraft = async () => {
-    await onComplete(normalizeSettings(draft));
+    if (isSaving) return;
+    setIsSaving(true);
+    setSaveError(null);
+    try {
+      await onComplete(normalizeSettings(configMode === 'general' ? clearTranslationOverride(draft) : draft));
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Could not save setup. Try again.');
+    } finally { setIsSaving(false); }
   };
 
   const requireConfigPassword = () => {
@@ -4075,58 +4128,41 @@ function SetupWizard({
     await handleImportConfig(payload);
   };
 
-  const stepIndex = step === 'translation' ? 1 : step === 'speech' ? 2 : step === 'image' ? 3 : 0;
-
   return (
     <>
-    <PopupPanel visible={visible} onClose={onSkip} panelStyle={styles.setupSheet}>
+    <PopupPanel visible={visible} onClose={onSkip} dismissible={!isSaving && !isConfigBusy} panelStyle={styles.setupSheet}>
           <View style={styles.sheetHeader}>
             <View style={styles.sheetHeaderText}>
               <Text style={styles.sheetTitle}>Set up tabitomo</Text>
-              <Text style={styles.sheetSubtitle}>Configure providers now, import settings, or continue with defaults.</Text>
             </View>
-            <IconButton icon={X} label="Skip" onPress={onSkip} compact />
+            <IconButton icon={X} label="Skip" onPress={onSkip} disabled={isSaving || isConfigBusy} compact />
           </View>
 
-          {step === 'translation' && canContinueTranslation && <Pressable accessibilityRole="button" onPress={completeWithDraft} style={({ pressed }) => [styles.wizardButtonPrimary, { marginHorizontal: 16, marginBottom: 8 }, pressed && styles.buttonPressed]}><Text style={styles.wizardButtonPrimaryText}>Start translating</Text></Pressable>}
-          {step !== 'choice' && step !== 'import' && (
-            <View style={styles.wizardStepRow}>
-              {[1, 2, 3].map((index) => (
-                <View
-                  key={index}
-                  style={[
-                    styles.wizardStepPill,
-                    index <= stepIndex && styles.wizardStepPillActive,
-                  ]}
-                />
-              ))}
-            </View>
-          )}
 
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.setupContent}>
+          <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" showsVerticalScrollIndicator={false} contentContainerStyle={styles.setupContent}>
             {step === 'choice' && (
               <>
                 <Pressable
+                  accessibilityRole="button"
                   onPress={() => setStep('translation')}
                   style={({ pressed }) => [styles.setupChoice, pressed && styles.buttonPressed]}
                 >
-                  <Sparkles size={21} color={theme.accentStrong} strokeWidth={2.5} />
+                  <Settings size={21} color={theme.accentStrong} strokeWidth={1.8} />
                   <View style={styles.setupChoiceTextWrap}>
                     <Text style={styles.setupChoiceTitle}>Manual setup</Text>
-                    <Text style={styles.setupChoiceText}>Add General AI, speech, OCR, and VLM settings in a short guided flow.</Text>
                   </View>
                 </Pressable>
                 <Pressable
+                  accessibilityRole="button"
                   onPress={() => setStep('import')}
                   style={({ pressed }) => [styles.setupChoice, pressed && styles.buttonPressed]}
                 >
                   <Import size={21} color={theme.accentStrong} strokeWidth={2.5} />
                   <View style={styles.setupChoiceTextWrap}>
                     <Text style={styles.setupChoiceTitle}>Import config</Text>
-                    <Text style={styles.setupChoiceText}>Use an encrypted .ttconfig payload, file, or QR code from the web app.</Text>
                   </View>
                 </Pressable>
-                <Pressable style={({ pressed }) => [styles.wizardButton, pressed && styles.buttonPressed]} onPress={onSkip}>
+                <Pressable accessibilityRole="button" style={({ pressed }) => [styles.wizardButton, pressed && styles.buttonPressed]} onPress={onSkip}>
                   <Text style={styles.wizardButtonText}>Set up later</Text>
                 </Pressable>
               </>
@@ -4142,25 +4178,15 @@ function SetupWizard({
                 />
                 {configMode === 'general' ? (
                   <>
-                    {visible && <AIConnection theme={theme} value={draft.generalAI} onChange={(generalAI) => setDraft((current) => ({ ...current, generalAI }))} />}
-                    <ChoiceRow
-                      options={API_FORMAT_OPTIONS.map((option) => option.value)}
-                      labels={API_FORMAT_OPTIONS.reduce<Record<string, string>>((labels, option) => {
-                        labels[option.value] = option.label;
-                        return labels;
-                      }, {})}
-                      value={draft.generalAI.apiFormat}
-                      onChange={(value) => updateGeneralAI({ apiFormat: value as APIFormat })}
-                    />
-                    <Field label="Endpoint" value={draft.generalAI.endpoint} onChangeText={(endpoint) => updateGeneralAI({ endpoint })} placeholder="https://api.openai.com/v1" />
-                    <Field label="Model" value={draft.generalAI.modelName} onChangeText={(modelName) => updateGeneralAI({ modelName })} placeholder="Model ID" />
-                    <Field label="API key" value={draft.generalAI.apiKey} onChangeText={(apiKey) => updateGeneralAI({ apiKey })} secureTextEntry placeholder="sk-..." />
+                    {visible && <AIConnection theme={theme} value={draft.generalAI} onChange={(generalAI) => setDraft((current) => ({ ...current, generalAI }))}>
+                      <Field label="Endpoint" value={draft.generalAI.endpoint} onChangeText={(endpoint) => updateGeneralAI({ endpoint })} placeholder="https://api.openai.com/v1" />
+                      <Field label="API key" value={draft.generalAI.apiKey} onChangeText={(apiKey) => updateGeneralAI({ apiKey })} secureTextEntry placeholder="sk-..." />
+                      <Field label="Model" value={draft.generalAI.modelName} onChangeText={(modelName) => updateGeneralAI({ modelName })} placeholder="Model ID" />
+                    </AIConnection>}
                   </>
                 ) : (
                   <>
-                    <Field label="Endpoint" value={draft.endpoint} onChangeText={(endpoint) => updateTranslation({ endpoint, provider: 'custom' })} placeholder="https://api.example.com/v1" />
-                    <Field label="Model" value={draft.modelName} onChangeText={(modelName) => updateTranslation({ modelName, provider: 'custom' })} placeholder="Translation model" />
-                    <Field label="API key" value={draft.apiKey} onChangeText={(apiKey) => updateTranslation({ apiKey, provider: 'custom' })} secureTextEntry placeholder="Provider API key" />
+                    <TranslationConnectionFields settings={draft} onChange={setDraft} />
                   </>
                 )}
               </SettingsSection>
@@ -4169,12 +4195,12 @@ function SetupWizard({
             {step === 'speech' && (
               <SettingsSection title="Speech input">
                 <ChoiceRow
-                  options={['web-speech', 'siliconflow', 'local']}
-                  labels={{ 'web-speech': 'Native', siliconflow: 'Cloud API', local: 'Local' }}
+                  options={['web-speech', 'openai-compatible', 'local']}
+                  labels={{ 'web-speech': 'Native', 'openai-compatible': 'Cloud API', local: 'Local' }}
                   value={draft.speechRecognition.provider}
                   onChange={(provider) => updateSpeech({ provider: provider as SpeechRecognitionProvider })}
                 />
-                {draft.speechRecognition.provider === 'siliconflow' && (
+                {draft.speechRecognition.provider === 'openai-compatible' && (
                   <>
                     <Field label="Endpoint" value={draft.speechRecognition.endpoint || ''} onChangeText={(endpoint) => updateSpeech({ endpoint })} placeholder="https://api.example.com/v1" />
                     <Field label="Model" value={draft.speechRecognition.modelName || ''} onChangeText={(modelName) => updateSpeech({ modelName })} placeholder="Transcription model" />
@@ -4182,7 +4208,7 @@ function SetupWizard({
                   </>
                 )}
                 {draft.speechRecognition.provider === 'local' && (
-                  <Text style={styles.wizardHint}>Local ASR uses iOS on-device Speech when the selected language supports it. Custom Core ML or Whisper/SenseVoice model runtime is still a native track.</Text>
+                  <Text style={styles.wizardHint}>Download a speech model in Settings. Apple Speech is used until it is ready.</Text>
                 )}
               </SettingsSection>
             )}
@@ -4205,9 +4231,9 @@ function SetupWizard({
                   />
                   <SettingToggle label="Show thinking" value={draft.vlm.enableThinking} onValueChange={(enableThinking) => updateVLM({ enableThinking })} />
                   {!draft.vlm.useGeneralAI && !draft.vlm.useCustom && (
-                    <Text style={styles.settingsHelp}>{draft.imageOCR.provider === 'local-ppocr'
-                      ? 'Local PP-OCR is an OCR overlay pipeline, not a direct VLM. Choose General AI or Custom for direct image translation.'
-                      : 'Reuses your OCR vision model. The legacy Qwen adapter uses its corresponding vision endpoint.'}</Text>
+                    <Text style={styles.settingsHelp}>{['local-ppocr', 'jina'].includes(draft.imageOCR.provider)
+                      ? 'Choose General AI or Custom for direct image translation.'
+                      : 'Uses your OCR vision connection.'}</Text>
                   )}
                   {draft.vlm.useCustom && (
                     <>
@@ -4221,8 +4247,7 @@ function SetupWizard({
             )}
 
             {step === 'import' && (
-              <SettingsSection title="Import encrypted config">
-                <Text style={styles.settingsHelp}>Compatible with web .ttconfig exports. Password is used for AES-GCM decryption and is not stored.</Text>
+              <SettingsSection title="Import encrypted config" help="Import a .ttconfig file or QR from tabitomo on any device. Use the password chosen during export; it is not stored.">
                 <Field label="Password" value={configPassword} onChangeText={setConfigPassword} secureTextEntry placeholder="Required for import" />
                 <View style={styles.configActionGrid}>
                   <ConfigAction icon={Import} label="Paste" onPress={handlePasteConfig} disabled={isConfigBusy} />
@@ -4257,45 +4282,50 @@ function SetupWizard({
             )}
           </ScrollView>
 
+          {saveError && <Text accessibilityRole="alert" style={styles.configStatus}>{saveError}</Text>}
           {step !== 'choice' && step !== 'import' && (
             <View style={styles.wizardActions}>
               <Pressable
+                accessibilityRole="button"
                 style={({ pressed }) => [styles.wizardButton, pressed && styles.buttonPressed]}
+                disabled={isSaving}
                 onPress={() => step === 'translation' ? setStep('choice') : step === 'speech' ? setStep('translation') : setStep('speech')}
               >
                 <Text style={styles.wizardButtonText}>Back</Text>
               </Pressable>
               <Pressable
+                accessibilityRole="button"
                 style={({ pressed }) => [
                   styles.wizardButtonPrimary,
                   step === 'translation' && !canContinueTranslation && styles.disabled,
                   pressed && !(step === 'translation' && !canContinueTranslation) && styles.buttonPressed,
                 ]}
-                disabled={step === 'translation' && !canContinueTranslation}
-                onPress={() => step === 'translation' ? setStep('speech') : step === 'speech' ? setStep('image') : completeWithDraft()}
+                disabled={isSaving || (step === 'translation' && !canContinueTranslation)}
+                onPress={() => step === 'speech' ? setStep('image') : void completeWithDraft()}
               >
-                <Text style={styles.wizardButtonPrimaryText}>{step === 'image' ? 'Finish setup' : 'Continue'}</Text>
+                <Text style={styles.wizardButtonPrimaryText}>{isSaving ? 'Saving…' : step === 'translation' ? 'Start translating' : step === 'image' ? 'Finish setup' : 'Continue'}</Text>
               </Pressable>
             </View>
           )}
 
+          {step === 'translation' && <Pressable accessibilityRole="button" disabled={isSaving || !canContinueTranslation} onPress={() => setStep('speech')} style={styles.setupOptionalButton}><Text style={styles.choiceText}>Speech & image options</Text></Pressable>}
+
           {step === 'import' && (
             <View style={styles.wizardActions}>
-              <Pressable style={({ pressed }) => [styles.wizardButton, pressed && styles.buttonPressed]} onPress={() => setStep('choice')}>
+              <Pressable accessibilityRole="button" style={({ pressed }) => [styles.wizardButton, pressed && styles.buttonPressed]} onPress={() => setStep('choice')}>
                 <Text style={styles.wizardButtonText}>Back</Text>
               </Pressable>
-              <Pressable style={({ pressed }) => [styles.wizardButtonPrimary, pressed && styles.buttonPressed]} onPress={onSkip}>
+              <Pressable accessibilityRole="button" style={({ pressed }) => [styles.wizardButtonPrimary, pressed && styles.buttonPressed]} onPress={onSkip}>
                 <Text style={styles.wizardButtonPrimaryText}>Set up later</Text>
               </Pressable>
             </View>
           )}
-    </PopupPanel>
-
       <QRScannerSheet
         visible={showQrScanner}
         onClose={() => setShowQrScanner(false)}
         onScanned={handleScannedConfig}
       />
+    </PopupPanel>
     </>
   );
 }
@@ -4354,8 +4384,9 @@ function ImageLightbox({
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.lightboxBackdrop}>
-        <SafeAreaView style={styles.lightboxSafeArea}>
+      <SafeAreaProvider style={styles.lightboxBackdrop}>
+        <SafeAreaLayout name="lightbox">
+          <StatusBar style="light" />
           <View style={styles.lightboxHeader}>
             <View>
               <Text style={styles.lightboxTitle}>Translated Image</Text>
@@ -4380,8 +4411,8 @@ function ImageLightbox({
               ))}
             </View>
           </View>
-        </SafeAreaView>
-      </View>
+        </SafeAreaLayout>
+      </SafeAreaProvider>
     </Modal>
   );
 }
@@ -4643,6 +4674,16 @@ function SettingsSheet({
 }) {
   const { styles, theme } = useAppTheme();
   const [draft, setDraft] = useState<AISettings>(settings);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const handleSave = async () => {
+    if (isSaving) return;
+    setIsSaving(true);
+    setSaveError(null);
+    try { await onSave(draft); }
+    catch (error) { setSaveError(error instanceof Error ? error.message : 'Could not save settings. Try again.'); }
+    finally { setIsSaving(false); }
+  };
   const [configPassword, setConfigPassword] = useState('');
   const [configPayload, setConfigPayload] = useState('');
   const [qrPayload, setQrPayload] = useState<string | null>(null);
@@ -4658,7 +4699,7 @@ function SettingsSheet({
   const [modelPackBusyKey, setModelPackBusyKey] = useState<string | null>(null);
   const [modelPackManifestUrl, setModelPackManifestUrl] = useState('');
   const [modelPackSmokeRunKey, setModelPackSmokeRunKey] = useState<string | null>(null);
-  const [activeSettingsCategory, setActiveSettingsCategory] = useState<SettingsCategoryId>('ai');
+  const [activeSettingsCategory, setActiveSettingsCategory] = useState<SettingsCategoryId>('general');
   const [cloudSyncStatus, setCloudSyncStatus] = useState(getMobileSettingsSyncStatus());
   const [cloudSyncEnabled, setCloudSyncEnabled] = useState(getMobileSettingsSyncEnabled());
   const [settingsContentReady, setSettingsContentReady] = useState(Platform.OS === 'web');
@@ -4693,7 +4734,7 @@ function SettingsSheet({
       setActiveSettingsCategory('offline');
       return;
     }
-    setActiveSettingsCategory('ai');
+    setActiveSettingsCategory('general');
   }, [initialJumpId, smokeVariant, visible]);
 
   useEffect(() => {
@@ -4705,7 +4746,7 @@ function SettingsSheet({
       ]).then(([enabled, status]) => {
         setCloudSyncEnabled(enabled);
         setCloudSyncStatus(status);
-      });
+      }).catch(() => setCloudSyncStatus({ state: 'unavailable', detail: 'Could not read iCloud status. Local settings are still available.' }));
     });
     return () => task.cancel();
   }, [visible]);
@@ -4725,6 +4766,7 @@ function SettingsSheet({
   useEffect(() => {
     if (visible) {
       setDraft(settings);
+      setSaveError(null);
       setConfigPassword(smokeVariant === 'qr-export'
         ? 'tabitomo-smoke-password'
         : smokeVariant === 'qr-import'
@@ -4743,7 +4785,6 @@ function SettingsSheet({
       setLocalRuntimeStatuses({});
       setLocalRuntimeBusy(null);
       setModelPackStatus(null);
-      setModelPackBusyKey(null);
       setModelPackSmokeRunKey(null);
       setModelPackManifestUrl(smokeVariant === 'model-pack-install' ? smokeModelPackManifestUrl || '' : '');
       if (smokeVariant === 'model-packs') {
@@ -4765,7 +4806,7 @@ function SettingsSheet({
         return () => task.cancel();
       }
     }
-  }, [refreshInstalledModelPacks, settings, smokeModelPackManifestUrl, smokeVariant, visible]);
+  }, [initialJumpId, refreshInstalledModelPacks, settings, smokeModelPackManifestUrl, smokeVariant, visible]);
 
   const updateGeneralAI = (patch: Partial<AISettings['generalAI']>) => {
     setDraft((current) => ({ ...current, generalAI: { ...current.generalAI, ...patch } }));
@@ -5129,12 +5170,11 @@ function SettingsSheet({
     try {
       await setMobileSettingsSyncEnabled(enabled);
       if (enabled) {
-        const saved = await saveMobileSettings(draft);
-        setDraft(saved);
+        await saveMobileSettings(settings);
       }
       setCloudSyncStatus(await refreshMobileSettingsSyncStatus());
     } catch (error) {
-      setCloudSyncEnabled(!enabled);
+      setCloudSyncEnabled(getMobileSettingsSyncEnabled());
       setCloudSyncStatus({
         state: 'error',
         detail: error instanceof Error ? error.message.replace(/CloudKit/gi, 'iCloud') : 'Could not update iCloud sync.',
@@ -5176,52 +5216,6 @@ function SettingsSheet({
     getOfflineModelDefinition('sensevoice-small'),
   ];
   const ppocrOfflineModel = getOfflineModelDefinition('ppocr-v6-small');
-  const translationModelForOutputMode = hasProviderConnection(draft)
-    ? draft.modelName
-    : draft.generalAI.modelName;
-  const isHunyuanTranslationModel = isHunyuanMTModel(translationModelForOutputMode);
-
-  useEffect(() => {
-    if (!visible || !isHunyuanTranslationModel || draft.translation.outputMode === 'plain') {
-      return;
-    }
-
-    setDraft((current) => {
-      const currentModel = hasProviderConnection(current)
-        ? current.modelName
-        : current.generalAI.modelName;
-      if (!isHunyuanMTModel(currentModel) || current.translation.outputMode === 'plain') {
-        return current;
-      }
-      return {
-        ...current,
-        translation: {
-          ...current.translation,
-          outputMode: 'plain',
-        },
-      };
-    });
-  }, [draft.translation.outputMode, isHunyuanTranslationModel, translationModelForOutputMode, visible]);
-
-  useEffect(() => {
-    if (!visible || smokeVariant !== 'hunyuan-output') {
-      return;
-    }
-
-    const passed = isHunyuanTranslationModel && draft.translation.outputMode === 'plain';
-    writeHunyuanOutputSmokeResult({
-      passed,
-      status: passed ? 'passed' : 'running',
-      modelName: translationModelForOutputMode,
-      outputMode: draft.translation.outputMode,
-      structuredDisabled: isHunyuanTranslationModel,
-      privacy: {
-        redacted: true,
-        apiKeysOmitted: true,
-      },
-    });
-  }, [draft.translation.outputMode, isHunyuanTranslationModel, smokeVariant, translationModelForOutputMode, visible]);
-
   useEffect(() => {
     if (!visible || smokeVariant !== 'qr-import') {
       return;
@@ -5422,15 +5416,15 @@ function SettingsSheet({
       <PopupPanel
         visible={visible}
         onClose={onClose}
+        dismissible={!isSaving && !isConfigBusy}
         panelStyle={styles.settingsSheet}
         baseBottomPadding={10}
       >
-          <View style={styles.sheetHeader}>
+          <View style={[styles.sheetHeader, styles.settingsHeader]}>
             <View style={styles.sheetHeaderText}>
               <Text style={styles.sheetTitle}>Settings</Text>
-              <Text style={styles.sheetSubtitle}>Stored securely on this device.</Text>
             </View>
-            <IconButton icon={X} label="Close" onPress={onClose} compact />
+            <IconButton icon={X} label="Close" onPress={onClose} disabled={isSaving || isConfigBusy} compact />
           </View>
 
           <SettingsCategoryBar
@@ -5439,6 +5433,8 @@ function SettingsSheet({
           />
 
           <ScrollView
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
             key={activeSettingsCategory}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.settingsContent}
@@ -5549,70 +5545,32 @@ function SettingsSheet({
               </SettingsSection>
             )}
 
-            {activeSettingsCategory === 'ai' && smokeVariant === 'hunyuan-output' && (
-              <SettingsSection title="Hunyuan-MT output smoke">
-                <Text style={styles.settingsHelp}>
-                  Hunyuan-MT is selected for translation. Plain output must be active and Structured mode must be disabled.
-                </Text>
-                <Text style={styles.configStatus}>
-                  {`Model: ${translationModelForOutputMode || 'none'} · Output: ${draft.translation.outputMode} · Structured disabled: ${isHunyuanTranslationModel ? 'yes' : 'no'}`}
-                </Text>
-              </SettingsSection>
-            )}
-
-            {activeSettingsCategory === 'ai' && (
-              <>
-            <SettingsSection
+            {activeSettingsCategory === 'general' && <SettingsSection
               title="General AI"
-              help="Connect your account or use any compatible provider. The API format must match the endpoint. Choose an image-capable model for direct photo translation."
+              help="Enter your provider API key and choose a model. Compatible API formats are detected automatically. Choose an image-capable model for direct photo translation."
             >
-              {visible && <AIConnection theme={theme} value={draft.generalAI} onChange={(generalAI) => setDraft((current) => ({ ...current, generalAI }))} />}
-              <ChoiceRow
-                options={API_FORMAT_OPTIONS.map((option) => option.value)}
-                labels={API_FORMAT_OPTIONS.reduce<Record<string, string>>((labels, option) => {
-                  labels[option.value] = option.label;
-                  return labels;
-                }, {})}
-                value={draft.generalAI.apiFormat}
-                onChange={(value) => updateGeneralAI({ apiFormat: value as APIFormat })}
-              />
-              <Field label="Endpoint" value={draft.generalAI.endpoint} onChangeText={(endpoint) => updateGeneralAI({ endpoint })} placeholder="https://api.openai.com/v1" />
-              <Field label="Model" value={draft.generalAI.modelName} onChangeText={(modelName) => updateGeneralAI({ modelName })} placeholder="Model ID" />
-              <Field label="API key" value={draft.generalAI.apiKey} onChangeText={(apiKey) => updateGeneralAI({ apiKey })} secureTextEntry placeholder="sk-..." />
-            </SettingsSection>
+              {visible && <AIConnection theme={theme} value={draft.generalAI} onChange={(generalAI) => setDraft((current) => ({ ...current, generalAI }))}>
+                <Field label="Endpoint" value={draft.generalAI.endpoint} onChangeText={(endpoint) => updateGeneralAI({ endpoint })} placeholder="https://api.openai.com/v1" />
+                <Field label="API key" value={draft.generalAI.apiKey} onChangeText={(apiKey) => updateGeneralAI({ apiKey })} secureTextEntry placeholder="sk-..." />
+                <Field label="Model" value={draft.generalAI.modelName} onChangeText={(modelName) => updateGeneralAI({ modelName })} placeholder="Model ID" />
+              </AIConnection>}
+            </SettingsSection>}
 
-            <SettingsSection
-              title="Translation override"
-              help="Use General AI for the simplest setup. Choose Separate model only when translation should use a different provider or specialized translation model. Structured output improves parsing; some models, including Hunyuan-MT, require Plain output."
+            {activeSettingsCategory === 'translation' && <SettingsSection
+              title="Translation model"
+              help="Use General AI or connect a separate translation model with its endpoint, API key and model ID. Load the provider catalog or enter a model ID manually. Plain text works with specialized translation models, including Hy-MT2; structured output is available under More options."
             >
               <ChoiceRow
                 options={['general', 'custom']}
                 labels={{ general: 'General AI', custom: 'Separate model' }}
-                value={draft.provider === 'custom' ? 'custom' : 'general'}
+                value={hasTranslationOverride(draft) ? 'custom' : 'general'}
                 onChange={(mode) => mode === 'general'
                   ? setDraft((current) => normalizeSettings(clearTranslationOverride(current)))
                   : updateTranslation({ provider: 'custom' })}
               />
-              {draft.provider === 'custom' && (
-                <>
-                <ChoiceRow
-                  options={['structured', 'plain']}
-                  value={isHunyuanTranslationModel ? 'plain' : draft.translation.outputMode}
-                  labels={{ structured: 'Structured', plain: 'Plain' }}
-                  disabledOptions={isHunyuanTranslationModel ? ['structured'] : []}
-                  onChange={(outputMode) => setDraft((current) => ({ ...current, translation: { ...current.translation, outputMode: outputMode as 'structured' | 'plain' } }))}
-                />
-                  {isHunyuanTranslationModel && (
-                    <Text style={styles.settingsHelp}>Hunyuan-MT requires plain text output.</Text>
-                  )}
-                  <Field label="Endpoint" value={draft.endpoint} onChangeText={(endpoint) => updateTranslation({ endpoint, provider: 'custom' })} placeholder="https://api.example.com/v1" />
-                  <Field label="Model" value={draft.modelName} onChangeText={(modelName) => updateTranslation({ modelName, provider: 'custom' })} placeholder="Translation model" />
-                  <Field label="API key" value={draft.apiKey} onChangeText={(apiKey) => updateTranslation({ apiKey, provider: 'custom' })} secureTextEntry placeholder="Provider API key" />
-                </>
-              )}
-            </SettingsSection>
-              </>
-            )}
+              {hasTranslationOverride(draft) && <TranslationConnectionFields settings={draft} onChange={setDraft} />}
+
+            </SettingsSection>}
 
             {activeSettingsCategory === 'speech' && (
             <SettingsSection
@@ -5620,12 +5578,12 @@ function SettingsSheet({
               help="Native uses Apple Speech. Cloud API uploads a recording to your configured transcription provider. Local uses a downloaded Whisper or SenseVoice model when the compatible native runtime is available, with Apple on-device Speech as fallback."
             >
               <ChoiceRow
-                options={['web-speech', 'siliconflow', 'local']}
-                labels={{ 'web-speech': 'Native', siliconflow: 'Cloud API', local: 'Local' }}
+                options={['web-speech', 'openai-compatible', 'local']}
+                labels={{ 'web-speech': 'Native', 'openai-compatible': 'Cloud API', local: 'Local' }}
                 value={draft.speechRecognition.provider}
                 onChange={(provider) => updateSpeech({ provider: provider as SpeechRecognitionProvider })}
               />
-              {draft.speechRecognition.provider === 'siliconflow' && (
+              {draft.speechRecognition.provider === 'openai-compatible' && (
                 <>
                   <Field label="Endpoint" value={draft.speechRecognition.endpoint || ''} onChangeText={(endpoint) => updateSpeech({ endpoint })} placeholder="https://api.example.com/v1" />
                   <Field label="Model" value={draft.speechRecognition.modelName || ''} onChangeText={(modelName) => updateSpeech({ modelName })} placeholder="Transcription model" />
@@ -5634,7 +5592,6 @@ function SettingsSheet({
               )}
               {draft.speechRecognition.provider === 'local' && (
                 <>
-                  <Text style={styles.settingsHelp}>Choose an offline speech engine and download it directly from tabitomo assets. The selected model runs fully on this device. Apple on-device Speech is used only when that model is missing or cannot load.</Text>
                   <ChoiceRow
                     options={['whisper', 'sensevoice']}
                     value={draft.speechRecognition.localEngine || 'whisper'}
@@ -5696,13 +5653,12 @@ function SettingsSheet({
             )}
 
             {activeSettingsCategory === 'image' && (
-            <SettingsSection title="Image OCR" help={OCR_HELP}>
+            <SettingsSection title="Image OCR" help={`${OCR_HELP} Local OCR uses downloaded PP-OCR, with Apple Vision as fallback when the model is unavailable.`}>
               <OCRFields settings={draft} onChange={setDraft} />
               {draft.imageOCR.provider === 'local-ppocr' && !draft.imageOCR.useGeneralAI && (() => {
                 const installed = installedModelPacks.find((pack) => pack.id === ppocrOfflineModel.packId);
                 return (
                   <>
-                    <Text style={styles.settingsHelp}>Download and verify PP-OCR v6 Small on this device. Once ready, PP-OCR handles image text locally; Apple Vision is used only when the model is missing or cannot run.</Text>
                     <OfflineModelRow
                       model={ppocrOfflineModel}
                       installed={installed}
@@ -5719,16 +5675,13 @@ function SettingsSheet({
 
             {activeSettingsCategory === 'offline' && (
               <>
-            <SettingsSection title="Native local runtime">
-              <Text style={styles.settingsHelp}>
-                Validates the iOS native replacements used by Local speech and Local PP-OCR for the current source language, {languageLabel(sourceLang)}.
-              </Text>
+            <SettingsSection title="Offline checks" help={`Check local speech and OCR availability for ${languageLabel(sourceLang)}. Results include any native fallback.`}>
               <RuntimeCheckButton
                 icon={Mic}
                 label="Check local ASR"
                 detail={localRuntimeStatuses.asr || (draft.speechRecognition.provider === 'local'
                   ? modelPackActivationDetail(asrModelPackActivation)
-                  : 'Shows whether Local speech can run on this iOS build.')}
+                  : '')}
                 running={localRuntimeBusy === 'asr'}
                 disabled={localRuntimeBusy !== null && localRuntimeBusy !== 'asr'}
                 onPress={() => runLocalRuntimeCheck('asr', checkLocalASRRuntime)}
@@ -5738,7 +5691,7 @@ function SettingsSheet({
                 label="Check local OCR"
                 detail={localRuntimeStatuses.ocr || (draft.imageOCR.provider === 'local-ppocr' && !draft.imageOCR.useGeneralAI
                   ? modelPackActivationDetail(ocrModelPackActivation)
-                  : 'Shows whether Local PP-OCR can use the iOS Vision module.')}
+                  : '')}
                 running={localRuntimeBusy === 'ocr'}
                 disabled={localRuntimeBusy !== null && localRuntimeBusy !== 'ocr'}
                 onPress={() => runLocalRuntimeCheck('ocr', checkLocalOCRRuntime)}
@@ -5749,9 +5702,6 @@ function SettingsSheet({
               title="Local models"
               help="Offline models are downloaded only from tabitomo's fixed asset domain, verified before activation, and stored on this device. They are not included in iCloud sync or configuration exports. Downloading a larger model can improve accuracy but uses more storage."
             >
-              <Text style={styles.settingsHelp}>
-                Download supported models directly from assets.tabitomo.alkinum.io. Model files stay on this device and are never included in iCloud sync or settings exports.
-              </Text>
               <LocalModelStatusRow
                 icon={Mic}
                 label="Active ASR"
@@ -5804,7 +5754,7 @@ function SettingsSheet({
               {!draft.vlm.useGeneralAI && !draft.vlm.useCustom && (
                 <View style={styles.linkedSettingsPanel}>
                   <Text style={styles.linkedSettingsTitle}>OCR settings used by VLM</Text>
-                  <Text style={styles.settingsHelp}>Custom vision reuses the OCR model. Qwen coordinate OCR uses its companion vision model. For Local OCR, choose General AI or Custom for direct vision translation.</Text>
+                  {['local-ppocr', 'jina'].includes(draft.imageOCR.provider) && <Text style={styles.settingsHelp}>Choose General AI or Custom for direct image translation.</Text>}
                   <OCRFields settings={draft} onChange={setDraft} />
                 </View>
               )}
@@ -5830,11 +5780,6 @@ function SettingsSheet({
                 disabled={Platform.OS !== 'ios'}
                 onValueChange={(enabled) => void handleCloudSyncChange(enabled)}
               />
-              <Text style={styles.settingsHelp}>
-                {cloudSyncEnabled
-                  ? 'iCloud sync is enabled. Your settings stay up to date across devices signed in to the same iCloud account.'
-                  : 'iCloud sync is off. This device keeps its settings locally and will not upload or apply iCloud changes.'}
-              </Text>
               <LocalModelStatusRow
                 icon={Cloud}
                 label={cloudSyncEnabled ? 'iCloud sync' : 'Sync disabled'}
@@ -5846,9 +5791,6 @@ function SettingsSheet({
               title="Import / Export"
               help="Export creates an encrypted .ttconfig payload compatible with tabitomo Web and Mobile. The password encrypts the payload and is not stored. Downloaded offline models and the iCloud opt-out choice are device-specific and are not exported."
             >
-              <Text style={styles.settingsHelp}>
-                Compatible with web .ttconfig exports. Password is used only for AES-GCM encryption and is not stored.
-              </Text>
               <Field label="Password" value={configPassword} onChangeText={setConfigPassword} secureTextEntry placeholder="Required for export/import" />
               <View style={styles.configActionGrid}>
                 <ConfigAction icon={Download} label="Export" onPress={handleExportConfig} disabled={isConfigBusy} />
@@ -5891,11 +5833,13 @@ function SettingsSheet({
             )}
           </ScrollView>
 
+          {saveError && <Text accessibilityRole="alert" style={styles.configStatus}>{saveError}</Text>}
           <View style={styles.settingsFooter}>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Cancel"
               style={({ pressed }) => [styles.footerButton, pressed && styles.buttonPressed]}
+              disabled={isSaving || isConfigBusy}
               onPress={onClose}
             >
               <Text style={styles.footerButtonText}>Cancel</Text>
@@ -5908,19 +5852,19 @@ function SettingsSheet({
                 styles.settingsSaveButton,
                 pressed && styles.buttonPressed,
               ]}
-              onPress={() => onSave(draft)}
+              disabled={isSaving || isConfigBusy}
+              onPress={() => void handleSave()}
             >
-              <Text style={styles.footerButtonPrimaryText}>Save</Text>
+              <Text style={styles.footerButtonPrimaryText}>{isSaving ? 'Saving…' : 'Save'}</Text>
             </Pressable>
           </View>
-      </PopupPanel>
-
       <QRScannerSheet
         visible={showQrScanner}
         onClose={() => setShowQrScanner(false)}
         onScanned={handleScannedConfig}
         smokeAutoScanPayload={smokeVariant === 'qr-import' ? qrImportSmokePayload || undefined : undefined}
       />
+      </PopupPanel>
     </>
   );
 }
@@ -5966,6 +5910,7 @@ function QRScannerSheet({
 }) {
   const { styles } = useAppTheme();
   const [permissionGranted, setPermissionGranted] = useState(false);
+  const [permissionPending, setPermissionPending] = useState(true);
   const [hasScanned, setHasScanned] = useState(false);
 
   useEffect(() => {
@@ -5974,9 +5919,13 @@ function QRScannerSheet({
       return;
     }
 
+    let active = true;
+    setPermissionPending(true);
     ExpoCamera.requestCameraPermissionsAsync().then((permission) => {
-      setPermissionGranted(permission.granted);
-    });
+      if (active) setPermissionGranted(permission.granted);
+    }).catch(() => { if (active) setPermissionGranted(false); })
+      .finally(() => { if (active) setPermissionPending(false); });
+    return () => { active = false; };
   }, [visible]);
 
   useEffect(() => {
@@ -6001,16 +5950,14 @@ function QRScannerSheet({
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.modalBackdrop}>
-        <View style={styles.qrScannerSheet}>
+    <PopupPanel visible={visible} onClose={onClose} panelStyle={styles.qrScannerSheet}>
           <View style={styles.sheetHeader}>
             <View style={styles.sheetHeaderText}>
               <Text style={styles.sheetTitle}>Scan settings QR</Text>
             </View>
             <IconButton icon={X} label="Close" onPress={onClose} compact />
           </View>
-          {permissionGranted ? (
+          {permissionPending ? <ActivityIndicator accessibilityLabel="Requesting camera access" /> : permissionGranted ? (
             <View style={styles.cameraShell}>
               <CameraView
                 style={styles.cameraPreview}
@@ -6021,11 +5968,12 @@ function QRScannerSheet({
               <View style={styles.scanFrame} pointerEvents="none" />
             </View>
           ) : (
-            <Text style={styles.settingsHelp}>Camera permission is required to import QR settings.</Text>
+            <View style={{ gap: 12 }}>
+              <Text style={styles.settingsHelp}>Camera permission is required to import QR settings.</Text>
+              {Platform.OS === 'ios' && <ConfigAction icon={Settings} label="Open device settings" onPress={() => { void Linking.openSettings().catch(() => Alert.alert('Camera access', 'Allow camera access in iPhone Settings.')); }} />}
+            </View>
           )}
-        </View>
-      </View>
-    </Modal>
+    </PopupPanel>
   );
 }
 
@@ -6213,7 +6161,7 @@ function DeviceQASheet({
     if (settings.imageOCR.useGeneralAI) {
       return hasGeneralAISettings(settings);
     }
-    return settings.imageOCR.provider !== 'local-ppocr'
+    return settings.imageOCR.provider !== 'local-ppocr' && settings.imageOCR.provider !== 'jina'
       && Boolean(hasProviderConnection(settings.imageOCR));
   };
 
@@ -6409,7 +6357,7 @@ function DeviceQASheet({
       },
       speechRecognition: {
         ...DEFAULT_SETTINGS.speechRecognition,
-        provider: 'siliconflow',
+        provider: 'openai-compatible',
         endpoint: 'https://device-qa-speech.example.test/v1',
         modelName: 'device-qa-speech',
         apiKey: 'device-qa-speech-key',
@@ -6889,9 +6837,7 @@ function DeviceQASheet({
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.modalBackdrop}>
-        <View style={styles.deviceQASheet}>
+    <PopupPanel visible={visible} onClose={onClose} panelStyle={styles.deviceQASheet}>
           <View style={styles.sheetHeader}>
             <View style={styles.sheetHeaderText}>
               <Text style={styles.sheetTitle}>iOS Device QA</Text>
@@ -6943,9 +6889,7 @@ function DeviceQASheet({
               <Text style={styles.footerButtonPrimaryText}>Done</Text>
             </Pressable>
           </View>
-        </View>
-      </View>
-    </Modal>
+    </PopupPanel>
   );
 }
 
@@ -7030,7 +6974,7 @@ function RuntimeCheckButton({
       </View>
       <View style={styles.runtimeCheckText}>
         <Text style={styles.runtimeCheckTitle}>{label}</Text>
-        <Text style={styles.runtimeCheckDetail}>{detail}</Text>
+        {!!detail && <Text style={styles.runtimeCheckDetail}>{detail}</Text>}
       </View>
     </Pressable>
   );
@@ -7231,63 +7175,53 @@ function ConfigAction({
   );
 }
 
-function SettingsCategoryBar({
-  active,
-  onChange,
-}: {
+function SettingsCategoryBar({ active, onChange }: {
   active: SettingsCategoryId;
   onChange: (id: SettingsCategoryId) => void;
 }) {
-  const { styles, theme } = useAppTheme();
+  const { styles } = useAppTheme();
+  const { reduceMotion } = useNativePreferences();
+  const scrollRef = useRef<ScrollView>(null);
+  const tabFrames = useRef<Partial<Record<SettingsCategoryId, { x: number; width: number }>>>({});
+  const viewportWidth = useRef(0);
+  const revealActiveTab = useCallback(() => {
+    const frame = tabFrames.current[active];
+    if (frame && viewportWidth.current) {
+      scrollRef.current?.scrollTo({
+        x: Math.max(0, frame.x - (viewportWidth.current - frame.width) / 2),
+        animated: !reduceMotion,
+      });
+    }
+  }, [active, reduceMotion]);
+  useEffect(revealActiveTab, [revealActiveTab]);
 
-  if (Platform.OS === 'ios') return <SegmentedControl
-    accessibilityLabel="Settings category"
-    values={SETTINGS_CATEGORY_ITEMS.map((item) => item.label)}
-    selectedIndex={SETTINGS_CATEGORY_ITEMS.findIndex((item) => item.id === active)}
-    appearance={theme.name}
-    fontStyle={{ fontSize: 12, color: theme.mutedText, fontWeight: '500' }}
-    activeFontStyle={{ fontSize: 12, color: theme.accentStrong, fontWeight: '600' }}
-    style={styles.nativeCategoryControl}
-    onChange={(event) => { selectionFeedback(); onChange(SETTINGS_CATEGORY_ITEMS[event.nativeEvent.selectedSegmentIndex].id); }}
-  />;
-
-  return (
-    <View accessibilityRole="tablist" style={styles.settingsCategoryBar}>
-        {SETTINGS_CATEGORY_ITEMS.map((item) => {
-          const selected = active === item.id;
-          const Icon = item.icon;
-          return (
-          <Pressable
-            accessibilityRole="tab"
-            accessibilityLabel={`${item.label} settings`}
-            accessibilityState={{ selected }}
-            key={item.id}
-            onPress={() => onChange(item.id)}
-            style={({ pressed }) => [
-              styles.settingsCategoryTab,
-              selected && styles.settingsCategoryTabActive,
-              pressed && styles.settingsCategoryTabPressed,
-            ]}
-          >
-            <Icon
-              size={15}
-              color={selected ? theme.accentStrong : theme.mutedText}
-              strokeWidth={2.4}
-            />
-            <Text
-              numberOfLines={1}
-              style={[
-                styles.settingsCategoryTabText,
-                selected && styles.settingsCategoryTabTextActive,
-              ]}
-            >
-              {item.label}
-            </Text>
-          </Pressable>
-          );
-        })}
+  return <ScrollView
+    ref={scrollRef}
+    horizontal
+    keyboardShouldPersistTaps="handled"
+    showsHorizontalScrollIndicator={false}
+    style={styles.settingsCategoryScroll}
+    onLayout={(event) => { viewportWidth.current = event.nativeEvent.layout.width; revealActiveTab(); }}
+    onContentSizeChange={revealActiveTab}
+  >
+    <View accessibilityRole="tablist" accessibilityLabel="Settings sections" style={styles.settingsCategoryBar}>
+      {SETTINGS_CATEGORY_ITEMS.map((item) => {
+        const selected = active === item.id;
+        return <Pressable
+          key={item.id}
+          accessibilityRole="tab"
+          accessibilityLabel={`${item.label} settings`}
+          aria-selected={selected}
+          accessibilityState={{ selected }}
+          onLayout={(event) => { tabFrames.current[item.id] = event.nativeEvent.layout; if (selected) revealActiveTab(); }}
+          onPress={() => { if (!selected) { Keyboard.dismiss(); selectionFeedback(); onChange(item.id); } }}
+          style={({ pressed }) => [styles.settingsCategoryTab, selected && styles.settingsCategoryTabActive, pressed && styles.settingsCategoryTabPressed]}
+        >
+          <Text style={[styles.settingsCategoryTabText, selected && styles.settingsCategoryTabTextActive]}>{item.label}</Text>
+        </Pressable>;
+      })}
     </View>
-  );
+  </ScrollView>;
 }
 
 function SettingsSection({
@@ -7321,21 +7255,49 @@ function SettingsSection({
   );
 }
 
+function TranslationConnectionFields({ settings, onChange }: { settings: AISettings; onChange: (settings: AISettings) => void }) {
+  const { styles, theme } = useAppTheme();
+  const [advanced, setAdvanced] = useState(false);
+  const connection = getTranslationConnection(settings);
+  const update = (patch: Partial<typeof connection>) => onChange(updateTranslationConnection(settings, { ...connection, ...patch }));
+  return <>
+    <AIConnection purpose="translation" theme={theme} value={connection} onChange={(value) => onChange(updateTranslationConnection(settings, value))}>
+      <Field label="Endpoint" value={connection.endpoint} onChangeText={(endpoint) => update({ endpoint })} placeholder="https://api.example.com/v1" />
+      <Field label="API key" value={connection.apiKey} onChangeText={(apiKey) => update({ apiKey })} secureTextEntry placeholder="Provider API key" />
+      <Field label="Model" value={connection.modelName} onChangeText={(modelName) => update({ modelName })} placeholder="Model ID" />
+    </AIConnection>
+    <Pressable accessibilityRole="button" accessibilityState={{ expanded: advanced }} onPress={() => setAdvanced(!advanced)} style={styles.ocrSettingsLink}>
+      <Text style={styles.ocrSettingsLinkText}>{advanced ? 'Fewer options' : 'More options'}</Text>
+    </Pressable>
+    {advanced && <>
+      <Text style={styles.fieldLabel}>Output</Text>
+      <ChoiceRow options={['plain', 'structured']} labels={{ plain: 'Plain text', structured: 'Structured' }}
+        value={settings.translation.outputMode}
+        onChange={(outputMode) => onChange({ ...settings, translation: { ...settings.translation, outputMode } })} />
+    </>}
+  </>;
+}
+
 function OCRFields({ settings, onChange }: { settings: AISettings; onChange: (settings: AISettings) => void }) {
   const { styles } = useAppTheme();
   const ocr = settings.imageOCR;
   const mode = getOCRMode(ocr);
+  const [advanced, setAdvanced] = useState(false);
   const update = (patch: Partial<ImageOCRSettings>) => onChange({ ...settings, imageOCR: { ...ocr, ...patch } });
   return <>
-    <ChoiceRow options={['local', 'general', 'custom', 'qwen']} labels={{ local: 'Local PP-OCR', general: 'General AI OCR', custom: 'Custom vision', qwen: 'Alibaba Qwen-OCR' }} value={mode} onChange={(value) => onChange({ ...settings, imageOCR: selectOCRMode(settings, value) })} />
-    {mode === 'local' && <Text style={styles.settingsHelp}>{LOCAL_MODEL_GUIDANCE.ocr}</Text>}
-    {mode === 'general' && <Text style={styles.settingsHelp}>Uses an image-capable General AI model. Extracted text appears without coordinate overlays.</Text>}
+    <ChoiceRow options={OCR_MODE_OPTIONS.map(({ value }) => value)} labels={Object.fromEntries(OCR_MODE_OPTIONS.map(({ value, label }) => [value, label]))} value={mode} onChange={(value) => { setAdvanced(false); onChange({ ...settings, imageOCR: selectOCRMode(settings, value) }); }} />
+    {mode === 'jina' && <>
+      <Field label="Jina API key" value={ocr.apiKey} onChangeText={(apiKey) => update({ apiKey })} secureTextEntry placeholder="jina_…" />
+      <Pressable accessibilityRole="link" onPress={() => { void Linking.openURL('https://jina.ai/').catch(() => Alert.alert('Jina API key', 'Visit jina.ai to get your API key.')); }} style={styles.ocrSettingsLink}><Text style={styles.ocrSettingsLinkText}>Get API key</Text></Pressable>
+    </>}
     {(mode === 'custom' || mode === 'qwen') && <>
-      {mode === 'qwen' && <ChoiceRow options={['beijing', 'singapore']} labels={{ beijing: 'Beijing', singapore: 'Singapore' }} value={ocr.endpoint === DASHSCOPE_OCR_ENDPOINT ? 'beijing' : 'singapore'} onChange={(region) => update({ endpoint: region === 'beijing' ? DASHSCOPE_OCR_ENDPOINT : DASHSCOPE_OCR_INTL_ENDPOINT, apiKey: '' })} />}
-      {mode === 'custom' && <Text style={styles.settingsHelp}>Use any vision-capable OpenAI-compatible model. Text is extracted without coordinate overlays.</Text>}
+      {mode === 'qwen' && <ChoiceRow options={['beijing', 'singapore']} labels={{ beijing: 'Beijing', singapore: 'Singapore' }} value={ocr.endpoint === DASHSCOPE_OCR_ENDPOINT ? 'beijing' : ocr.endpoint === DASHSCOPE_OCR_INTL_ENDPOINT ? 'singapore' : ''} onChange={(region) => update({ endpoint: region === 'beijing' ? DASHSCOPE_OCR_ENDPOINT : DASHSCOPE_OCR_INTL_ENDPOINT, apiKey: '' })} />}
+      <Field label={mode === 'qwen' ? 'Alibaba Model Studio API key' : 'OCR API key'} value={ocr.apiKey} onChangeText={(apiKey) => update({ apiKey })} secureTextEntry placeholder={mode === 'qwen' ? 'DashScope API key' : 'Optional for local servers'} />
+      {mode === 'qwen' && <Pressable accessibilityRole="button" accessibilityState={{ expanded: advanced }} onPress={() => setAdvanced(!advanced)} style={styles.ocrSettingsLink}><Text style={styles.ocrSettingsLinkText}>{advanced ? 'Fewer options' : 'More options'}</Text></Pressable>}
+      {(mode === 'custom' || advanced) && <>
       <Field label={mode === 'qwen' ? 'Alibaba OCR endpoint' : 'Custom OCR endpoint'} value={ocr.endpoint} onChangeText={(endpoint) => update({ endpoint })} placeholder={mode === 'qwen' ? DASHSCOPE_OCR_INTL_ENDPOINT : 'https://api.example.com/v1'} />
       <Field label="OCR model" value={ocr.modelName || ''} onChangeText={(modelName) => update({ modelName })} placeholder={mode === 'qwen' ? 'qwen3.5-ocr' : 'Vision model ID'} />
-      <Field label={mode === 'qwen' ? 'Alibaba Model Studio API key' : 'OCR API key'} value={ocr.apiKey} onChangeText={(apiKey) => update({ apiKey })} secureTextEntry placeholder={mode === 'qwen' ? 'DashScope API key' : 'Optional for local servers'} />
+      </>}
     </>}
   </>;
 }
@@ -7355,6 +7317,14 @@ function Field({
 }) {
   const { styles, theme } = useAppTheme();
   const [secureTextVisible, setSecureTextVisible] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const auditScene = useContext(SafeAreaAuditContext);
+  const inputRef = useRef<TextInput>(null);
+  useEffect(() => {
+    if (auditScene !== 'settings-keyboard' || label !== 'Endpoint') return;
+    const timer = setTimeout(() => inputRef.current?.focus(), 700);
+    return () => clearTimeout(timer);
+  }, [auditScene, label]);
   const secureInputMasked = secureTextEntry && !secureTextVisible;
   const SecureIcon = secureTextVisible ? EyeOff : Eye;
 
@@ -7372,7 +7342,9 @@ function Field({
             secureTextEntry={secureInputMasked}
             autoCapitalize="none"
             autoCorrect={false}
-            style={[styles.fieldInput, styles.secureFieldInput]}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+            style={[styles.fieldInput, styles.secureFieldInput, focused && styles.fieldFocused]}
           />
           <Pressable
             accessibilityRole="button"
@@ -7385,7 +7357,7 @@ function Field({
           </Pressable>
         </View>
       ) : (
-        <TextInput
+        <TextInput ref={inputRef}
           accessibilityLabel={label}
           value={value}
           onChangeText={onChangeText}
@@ -7394,7 +7366,9 @@ function Field({
           secureTextEntry={false}
           autoCapitalize="none"
           autoCorrect={false}
-          style={styles.fieldInput}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          style={[styles.fieldInput, focused && styles.fieldFocused]}
         />
       )}
     </View>
@@ -7462,6 +7436,8 @@ function SettingToggle({
     <View style={[styles.toggleRow, disabled && styles.disabled]}>
       <Text style={styles.toggleLabel}>{label}</Text>
       <Switch
+        style={styles.toggleSwitch}
+        accessibilityLabel={label}
         value={value}
         disabled={disabled}
         onValueChange={onValueChange}
@@ -7473,17 +7449,20 @@ function SettingToggle({
 }
 
 function createStyles(theme: AppTheme) {
+  const controls = createControlStyles(theme);
   return StyleSheet.create({
+  fieldFocused: controls.focused,
+  resultProgress: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 12 },
+  setupOptionalButton: { minHeight: 44, alignItems: 'center', justifyContent: 'center', paddingTop: 4 },
   headerSettingsMaterial: { width: 48, height: 48, borderRadius: 24 },
   headerEditing: { minHeight: 56, paddingTop: 0, paddingBottom: 4 },
   brandEditing: { fontSize: 22, letterSpacing: -0.6 },
   brandIconEditing: { width: 32, height: 32 },
-  nativeModeControl: { height: 40, marginBottom: 16 },
-  nativeCategoryControl: { height: 36, marginBottom: 10 },
-  translationSheet: { borderRadius: 30, borderCurve: 'continuous', backgroundColor: theme.panel, borderWidth: StyleSheet.hairlineWidth, borderColor: theme.name === 'dark' ? theme.border : '#ffffff', shadowColor: theme.shadow, shadowOpacity: theme.name === 'dark' ? 0.2 : 0.1, shadowRadius: 18, shadowOffset: { width: 0, height: 9 } },
-  inputDock: { marginTop: 14, borderRadius: 32, shadowColor: theme.shadow, shadowOpacity: 0.14, shadowRadius: 16, shadowOffset: { width: 0, height: 8 } },
-  translateButtonFill: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, borderRadius: 24 },
-  nativeSheetContent: { flex: 1, height: '100%', maxHeight: '100%', borderRadius: 0, paddingTop: 4, paddingHorizontal: 16, backgroundColor: theme.field },
+  nativeModeControl: { height: 44, marginBottom: 16 },
+  nativeCategoryControl: { height: 44, marginBottom: 10 },
+  translationSheet: { borderRadius: 24, borderCurve: 'continuous', backgroundColor: theme.panel, borderWidth: StyleSheet.hairlineWidth, borderColor: theme.border },
+  inputDock: { marginTop: 14, borderRadius: 24 },
+  nativeSheetContent: { flex: 1, minHeight: 0, maxHeight: '100%', borderRadius: 0, paddingTop: 4, paddingHorizontal: 16, backgroundColor: theme.field, paddingBottom: 0 },
   sheetGrabber: { width: 36, height: 5, borderRadius: 3, alignSelf: 'center', marginTop: 9, marginBottom: 15, backgroundColor: theme.choiceBorder },
   settingsGroup: { gap: 14, padding: 14, borderRadius: 20, borderCurve: 'continuous', backgroundColor: theme.panel },
   languageSearch: { minHeight: 44, borderRadius: 12, backgroundColor: theme.choice, paddingHorizontal: 12, fontSize: 17, color: theme.text, marginBottom: 16, outlineWidth: 0 },
@@ -7492,13 +7471,8 @@ function createStyles(theme: AppTheme) {
   },
   resultEmpty: { flex: 1, minHeight: 155, alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 12 },
   resultEmptyNarrow: { minHeight: 130 },
-  resultEmptyIcon: { width: 56, height: 56, borderRadius: 18, backgroundColor: theme.activeSurface, alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
   resultEmptyTitle: { color: theme.text, fontSize: 14, fontWeight: '500', textAlign: 'center' },
   workspaceFooterText: { color: theme.subtleText, fontSize: 11, textAlign: 'center', paddingTop: 6 },
-  safeArea: {
-    flex: 1,
-    paddingTop: 8,
-  },
   keyboardAvoiding: {
     flex: 1,
     width: '100%',
@@ -7528,25 +7502,22 @@ function createStyles(theme: AppTheme) {
     paddingHorizontal: 16, paddingTop: 4,
   },
   header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 88, paddingHorizontal: 22, paddingTop: 12, paddingBottom: 18,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 68, gap: 12, paddingHorizontal: 20, paddingTop: 4, paddingBottom: 10,
   },
   brandRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
+    flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, minWidth: 0,
   },
   brandIcon: {
     width: 42, height: 42,
   },
   brand: {
-    color: theme.text, fontSize: 30, fontWeight: '700', letterSpacing: -1.1,
-  },
-  subtitle: {
-    color: theme.mutedText, fontSize: 12, fontWeight: '400', marginTop: 3,
+    color: theme.text, fontSize: 28, fontWeight: '700', letterSpacing: -0.8, flexShrink: 1,
   },
   headerSettingsButton: {
     width: 48, height: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 24,
   },
   headerSettingsButtonPressed: {
-    transform: [{ scale: 0.94 }], opacity: 0.75,
+    opacity: 0.65,
   },
   settingsStatusDot: {
     position: 'absolute',
@@ -7560,7 +7531,7 @@ function createStyles(theme: AppTheme) {
     borderColor: theme.accent,
   },
   languageBar: {
-    flexDirection: 'row', alignItems: 'center', gap: 2, padding: 5, marginBottom: 18, borderRadius: 28, shadowColor: theme.shadow, shadowOpacity: 0.06, shadowRadius: 10, shadowOffset: { width: 0, height: 4 },
+    flexDirection: 'row', alignItems: 'center', gap: 2, padding: 5, marginBottom: 18, borderRadius: 20,
   },
   languageBarTargetOnly: {
     justifyContent: 'flex-start',
@@ -7610,7 +7581,7 @@ function createStyles(theme: AppTheme) {
     zIndex: 1,
   },
   textModeButtonPressed: {
-    transform: [{ scale: 0.97 }],
+    opacity: 0.7,
   },
   textModeButtonText: {
     color: theme.mutedText, fontSize: 12, fontWeight: '500',
@@ -7625,13 +7596,13 @@ function createStyles(theme: AppTheme) {
     paddingBottom: 24, paddingTop: 12,
   },
   panel: {
-    borderTopLeftRadius: 30, borderTopRightRadius: 30, paddingHorizontal: 22, paddingTop: 12, paddingBottom: 20, backgroundColor: theme.panel,
+    borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 20, backgroundColor: theme.panel,
   },
   panelCompact: {
     paddingHorizontal: 20, paddingTop: 10, paddingBottom: 18,
   },
   resultPanel: {
-    borderBottomLeftRadius: 30, borderBottomRightRadius: 30, borderCurve: 'continuous', backgroundColor: theme.name === 'dark' ? '#242846' : '#f1f2fd', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.border, padding: 20, minHeight: 212,
+    borderBottomLeftRadius: 24, borderBottomRightRadius: 24, borderCurve: 'continuous', backgroundColor: theme.resultPanel, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.border, padding: 20, minHeight: 212,
   },
   resultPanelNarrow: { minHeight: 190, padding: 18 },
   panelHeader: {
@@ -7642,12 +7613,13 @@ function createStyles(theme: AppTheme) {
     marginBottom: 8,
   },
   panelTitleRow: {
+    flexShrink: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
   },
   panelTitle: {
-    color: theme.mutedText, fontSize: 13, fontWeight: '500',
+    color: theme.mutedText, fontSize: 13, fontWeight: '500', flexShrink: 1,
   },
   panelMeta: {
     color: theme.accentStrong, fontSize: 13, fontWeight: '500', flexShrink: 1, textAlign: 'right',
@@ -7805,44 +7777,27 @@ function createStyles(theme: AppTheme) {
     color: theme.mutedText, fontSize: 12, lineHeight: 19, fontWeight: '400', textAlign: 'center',
   },
   configGuidanceCard: {
-    minHeight: 72,
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 14,
-    backgroundColor: theme.field,
-    borderWidth: 1,
-    borderColor: theme.fieldBorder,
-    padding: 10,
-    gap: 10,
+    minHeight: 156, justifyContent: 'center', alignItems: 'flex-start', gap: 14, paddingVertical: 12,
   },
   configGuidanceCopy: {
-    flex: 1,
     minWidth: 0,
-    gap: 2,
+    gap: 6,
   },
   configGuidanceTitle: {
     color: theme.accentDeep,
-    fontSize: 12,
+    fontSize: 15,
     fontWeight: '700',
   },
   configGuidanceText: {
     color: theme.mutedText,
-    fontSize: 11,
-    lineHeight: 15,
+    fontSize: 13,
+    lineHeight: 20,
     fontWeight: '400',
   },
   configGuidanceButton: {
-    width: 34,
-    height: 34,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 11,
-    backgroundColor: theme.accent,
-    shadowColor: theme.shadow,
-    shadowOpacity: theme.name === 'dark' ? 0.36 : 0.1,
-    shadowRadius: 0,
-    shadowOffset: { width: 0, height: 3 },
+    ...controls.primary, flexDirection: 'row', gap: 8, paddingHorizontal: 16,
   },
+  configGuidanceButtonText: { color: theme.inverseText, fontSize: 14, fontWeight: '600' },
   imagePreview: {
     width: '100%',
     overflow: 'hidden',
@@ -7855,13 +7810,11 @@ function createStyles(theme: AppTheme) {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    padding: 12,
   },
   lightboxBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(2,6,23,0.92)',
-  },
-  lightboxSafeArea: {
-    flex: 1,
   },
   lightboxHeader: {
     flexDirection: 'row',
@@ -7949,18 +7902,16 @@ function createStyles(theme: AppTheme) {
   },
   segmentButton: {
     flex: 1,
-    minHeight: 34,
+    minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 999,
-    paddingHorizontal: 12,
+    paddingHorizontal: 8,
   },
   segmentButtonActive: {
     backgroundColor: theme.accent,
     shadowColor: theme.shadow,
-    shadowOpacity: theme.name === 'dark' ? 0.34 : 0.1,
-    shadowRadius: 0,
-    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0,
   },
   segmentButtonText: {
     color: theme.mutedText,
@@ -7989,9 +7940,7 @@ function createStyles(theme: AppTheme) {
     borderWidth: 1,
     borderColor: theme.border,
     shadowColor: theme.shadow,
-    shadowOpacity: theme.name === 'dark' ? 0.36 : 0.1,
-    shadowRadius: 0,
-    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0,
   },
   iconButtonCompact: {
     width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22, backgroundColor: theme.chip,
@@ -7999,7 +7948,13 @@ function createStyles(theme: AppTheme) {
   iconButtonQuiet: { backgroundColor: 'transparent' },
   clearButton: { minHeight: 44, paddingHorizontal: 4, flexDirection: 'row', alignItems: 'center', gap: 5 },
   clearButtonText: { color: theme.mutedText, fontSize: 11, fontWeight: '400' },
-  translateButton: { minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: 15, borderRadius: 24, borderCurve: 'continuous', backgroundColor: theme.accent, shadowColor: theme.accentStrong, shadowOpacity: 0.3, shadowRadius: 8, shadowOffset: { width: 0, height: 4 } },
+  translateButton: { ...controls.primary, minWidth: 108, paddingHorizontal: 18, paddingVertical: 12 },
+  translateButtonLargeText: { alignSelf: 'stretch' },
+  sourceToolbarLargeText: { flexDirection: 'column', gap: 8, padding: 8 },
+  textModeBarLargeText: { flexDirection: 'column', alignItems: 'stretch' },
+  textModeButtonLargeText: { flex: 0, paddingVertical: 10, borderWidth: 1, borderColor: 'transparent' },
+  settingsCategoryScroll: { flexGrow: 0, flexShrink: 0, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.border },
+  settingsHeader: { marginBottom: 4 },
   translateButtonDisabled: { opacity: 0.45, shadowOpacity: 0 },
   translateButtonText: { color: theme.inverseText, fontSize: 14, fontWeight: '600' },
   iconButtonEmphasized: {
@@ -8019,7 +7974,7 @@ function createStyles(theme: AppTheme) {
     opacity: 0.45,
   },
   buttonPressed: {
-    transform: [{ scale: 0.96 }], opacity: 0.8,
+    opacity: 0.65,
   },
   busyOverlay: {
     position: 'absolute', left: 26, right: 26, bottom: 110, minHeight: 46, borderRadius: 23, backgroundColor: theme.busyBackground, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
@@ -8044,14 +7999,13 @@ function createStyles(theme: AppTheme) {
     right: 0,
     bottom: 0,
     left: 0,
-    pointerEvents: 'none',
     backgroundColor: theme.backdrop,
   },
   sheet: {
     maxHeight: '78%',
     borderTopLeftRadius: 26,
     borderTopRightRadius: 26,
-    backgroundColor: theme.card,
+    backgroundColor: theme.field,
     paddingTop: 16,
     paddingHorizontal: 16,
     paddingBottom: 18,
@@ -8060,7 +8014,7 @@ function createStyles(theme: AppTheme) {
     height: '92%',
     borderTopLeftRadius: 26,
     borderTopRightRadius: 26,
-    backgroundColor: theme.card,
+    backgroundColor: theme.field,
     paddingTop: 16,
     paddingHorizontal: 16,
     paddingBottom: 10,
@@ -8069,7 +8023,7 @@ function createStyles(theme: AppTheme) {
     maxHeight: '88%',
     borderTopLeftRadius: 26,
     borderTopRightRadius: 26,
-    backgroundColor: theme.card,
+    backgroundColor: theme.field,
     paddingTop: 16,
     paddingHorizontal: 16,
     paddingBottom: 10,
@@ -8104,45 +8058,23 @@ function createStyles(theme: AppTheme) {
   languageRowName: {
     color: theme.text, fontSize: 17, fontWeight: '400',
   },
-  settingsCategoryBar: {
-    minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: 3, borderRadius: 16, padding: 4, marginBottom: 8, backgroundColor: theme.field,
-  },
+  settingsCategoryBar: { flexDirection: 'row', alignItems: 'stretch', gap: 4 },
   settingsCategoryTab: {
-    flex: 1,
-    minWidth: 0,
-    minHeight: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 3,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'transparent',
+    minHeight: 48, paddingHorizontal: 14, paddingVertical: 12,
+    alignItems: 'center', justifyContent: 'center', borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
   },
-  settingsCategoryTabActive: {
-    backgroundColor: theme.panel, borderColor: theme.border, shadowColor: theme.shadow, shadowOpacity: 0.04, shadowRadius: 4, shadowOffset: { width: 0, height: 2 },
-  },
-  settingsCategoryTabPressed: {
-    opacity: 0.82,
-    transform: [{ scale: 0.98 }],
-  },
-  settingsCategoryTabText: {
-    color: theme.mutedText,
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  settingsCategoryTabTextActive: {
-    color: theme.accentStrong,
-    fontWeight: '700',
-  },
-  settingsContent: {
-    gap: 6, paddingBottom: 16,
-  },
+  settingsCategoryTabActive: { borderBottomColor: theme.accentStrong },
+  settingsCategoryTabPressed: { opacity: 0.6 },
+  settingsCategoryTabText: { color: theme.mutedText, fontSize: 15, fontWeight: '600' },
+  settingsCategoryTabTextActive: { color: theme.accentStrong },
+  settingsContent: { gap: 6, paddingTop: 8, paddingBottom: 16 },
   setupContent: {
     gap: 12,
     paddingBottom: 14,
   },
   setupChoice: {
-    minHeight: 92,
+    minHeight: 60,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
@@ -8161,13 +8093,6 @@ function createStyles(theme: AppTheme) {
     color: theme.text,
     fontSize: 15,
     fontWeight: '700',
-  },
-  setupChoiceText: {
-    color: theme.mutedText,
-    fontSize: 12,
-    lineHeight: 17,
-    fontWeight: '400',
-    outlineWidth: 0,
   },
   wizardStepRow: {
     flexDirection: 'row',
@@ -8192,24 +8117,13 @@ function createStyles(theme: AppTheme) {
   },
   wizardButton: {
     flex: 1,
-    minHeight: 46,
+    minHeight: 48,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 15,
+    borderRadius: 16,
     backgroundColor: theme.choice,
   },
-  wizardButtonPrimary: {
-    flex: 1,
-    minHeight: 46,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 15,
-    backgroundColor: theme.accent,
-    shadowColor: theme.shadow,
-    shadowOpacity: 0.14,
-    shadowRadius: 0,
-    shadowOffset: { width: 0, height: 3 },
-  },
+  wizardButtonPrimary: { ...controls.primary, flex: 1 },
   wizardButtonText: {
     color: theme.mutedText,
     fontSize: 14,
@@ -8245,20 +8159,30 @@ function createStyles(theme: AppTheme) {
     paddingVertical: 10,
   },
   settingsSection: {
-    gap: 9, paddingTop: 16, paddingBottom: 8,
+    gap: 4, paddingTop: 8, paddingBottom: 8,
   },
   settingsSectionTitle: {
-    color: theme.mutedText, fontSize: 13, fontWeight: '500',
+    color: theme.mutedText, fontSize: 13, fontWeight: '500', flexShrink: 1,
   },
   settingsSectionHeader: {
     minHeight: 30, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingHorizontal: 8,
   },
   settingsHelpButton: {
-    width: 32,
-    height: 32,
+    width: 44,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 12,
+  },
+  ocrSettingsLink: {
+    minHeight: 44,
+    alignSelf: 'flex-start',
+    justifyContent: 'center',
+  },
+  ocrSettingsLinkText: {
+    color: theme.accentStrong,
+    fontSize: 12,
+    fontWeight: '600',
   },
   settingsHelp: {
     color: theme.mutedText,
@@ -8345,8 +8269,8 @@ function createStyles(theme: AppTheme) {
     paddingVertical: 9,
   },
   modelPackDelete: {
-    width: 34,
-    height: 34,
+    width: 44,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 12,
@@ -8364,21 +8288,19 @@ function createStyles(theme: AppTheme) {
     fontSize: 12,
     fontWeight: '600',
   },
-  fieldInput: {
-    minHeight: 48, borderRadius: 11, borderWidth: StyleSheet.hairlineWidth, borderColor: theme.fieldBorder, backgroundColor: theme.field, color: theme.text, paddingHorizontal: 12, fontSize: 15, fontWeight: '400',
-  },
+  fieldInput: controls.input,
   secureFieldInputWrap: {
     position: 'relative',
     justifyContent: 'center',
   },
   secureFieldInput: {
-    paddingRight: 46,
+    paddingRight: 54,
   },
   secureFieldReveal: {
     position: 'absolute',
     right: 6,
-    width: 34,
-    height: 34,
+    width: 44,
+    height: 44,
     borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
@@ -8388,9 +8310,7 @@ function createStyles(theme: AppTheme) {
     flexWrap: 'wrap',
     gap: 8,
   },
-  choice: {
-    minHeight: 44, justifyContent: 'center', borderRadius: 12, backgroundColor: theme.field, paddingHorizontal: 12, borderWidth: 1, borderColor: theme.border,
-  },
+  choice: controls.choice,
   choiceActive: {
     backgroundColor: theme.activeSurface,
     borderColor: theme.activeBorder,
@@ -8413,13 +8333,16 @@ function createStyles(theme: AppTheme) {
   toggleLabel: {
     color: theme.text, fontSize: 14, fontWeight: '400', flex: 1, paddingVertical: 10, paddingRight: 10,
   },
+  // iOS Switch supplies alignSelf: 'flex-start', overriding the row's centering.
+  // Keep its intrinsic system size and center it even when the label wraps.
+  toggleSwitch: { alignSelf: 'center', flexShrink: 0 },
   configActionGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
   },
   configAction: {
-    minHeight: 42,
+    minHeight: 48,
     minWidth: '47%',
     flex: 1,
     flexDirection: 'row',
@@ -8451,15 +8374,12 @@ function createStyles(theme: AppTheme) {
     fontWeight: '400',
   },
   importPayloadButton: {
-    minHeight: 42,
+    minHeight: 48,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 14,
     backgroundColor: theme.accent,
-    shadowColor: theme.shadow,
-    shadowOpacity: 0.14,
-    shadowRadius: 0,
-    shadowOffset: { width: 0, height: 3 },
+
   },
   importPayloadButtonText: {
     color: theme.inverseText,
@@ -8475,10 +8395,7 @@ function createStyles(theme: AppTheme) {
     borderWidth: 1,
     borderColor: theme.border,
     padding: 12,
-    shadowColor: theme.shadow,
-    shadowOpacity: 0.1,
-    shadowRadius: 0,
-    shadowOffset: { width: 0, height: 4 },
+
   },
   qrCaption: {
     color: theme.mutedText,
@@ -8495,7 +8412,7 @@ function createStyles(theme: AppTheme) {
     height: '72%',
     borderTopLeftRadius: 26,
     borderTopRightRadius: 26,
-    backgroundColor: theme.card,
+    backgroundColor: theme.field,
     paddingTop: 16,
     paddingHorizontal: 16,
     paddingBottom: 18,
@@ -8504,7 +8421,7 @@ function createStyles(theme: AppTheme) {
     height: '82%',
     borderTopLeftRadius: 26,
     borderTopRightRadius: 26,
-    backgroundColor: theme.card,
+    backgroundColor: theme.field,
     paddingTop: 16,
     paddingHorizontal: 16,
     paddingBottom: 10,
@@ -8526,8 +8443,8 @@ function createStyles(theme: AppTheme) {
     paddingVertical: 9,
   },
   deviceQACheckIcon: {
-    width: 34,
-    height: 34,
+    width: 44,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 12,
@@ -8572,15 +8489,9 @@ function createStyles(theme: AppTheme) {
   settingsFooter: {
     flexDirection: 'row', gap: 10, paddingTop: 12, paddingBottom: 2,
   },
-  footerButton: {
-    flex: 1, minHeight: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 24, backgroundColor: theme.choice,
-  },
-  footerButtonPrimary: {
-    flex: 1, minHeight: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 24, backgroundColor: theme.accent, shadowColor: theme.accentStrong, shadowOpacity: 0.2, shadowRadius: 8, shadowOffset: { width: 0, height: 4 },
-  },
-  settingsSaveButton: {
-    shadowColor: theme.accentStrong, shadowOpacity: 0.2, shadowRadius: 8, shadowOffset: { width: 0, height: 4 },
-  },
+  footerButton: { ...controls.primary, flex: 1, backgroundColor: theme.choice },
+  footerButtonPrimary: { ...controls.primary, flex: 1 },
+  settingsSaveButton: {},
   footerButtonText: {
     color: theme.mutedText,
     fontSize: 15,

@@ -91,7 +91,7 @@ test('web loadSettings normalization matches shared core normalization', () => {
       modelName: 'bad-format-model',
       apiFormat: 'not-a-real-api-format',
     },
-    modelName: 'Tencent/Hunyuan-MT-7B',
+    modelName: 'tencent/hy-mt2-7b',
     endpoint: 'https://translation.example.test/v1',
     apiKey: 'translation-key',
     speechRecognition: {
