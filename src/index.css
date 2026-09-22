@@ -560,3 +560,35 @@ ruby + ruby {
 .translation-connection-field label { font-size: 13px; font-weight: 600; }
 .translation-connection-field input { width: 100%; min-height: 48px; padding: 10px 12px; border: 1px solid var(--tt-border); border-radius: 12px; background: var(--tt-field); color: var(--tt-text); font-size: 14px; }
 .settings-choice-grid button:disabled { opacity: .45; cursor: default; }
+
+/* Setup starts with a compact choice, then gives the editable form more room. */
+.setup-dialog { display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--tt-border); }
+.setup-dialog[data-step="form"] { height: min(720px, var(--tt-dialog-height)); }
+.setup-header { display: flex; align-items: center; gap: 8px; padding: 16px 16px 12px; flex-shrink: 0; }
+.setup-header h2 { flex: 1; min-width: 0; font-size: 21px; font-weight: 700; letter-spacing: -.4px; }
+.setup-header button { width: 44px; height: 44px; flex-shrink: 0; display: grid; place-items: center; border-radius: 50%; color: var(--tt-muted-text); }
+.setup-header button:hover { background: var(--tt-field); }
+.setup-content { overflow-y: auto; min-height: 0; padding: 0 20px 20px; overscroll-behavior: contain; }
+.setup-choices { display: grid; gap: 12px; }
+.setup-choice { min-height: 80px; padding: 12px 14px; display: flex; align-items: center; gap: 12px; text-align: left; border: 1px solid var(--tt-border); border-radius: 18px; background: var(--tt-field); transition: background .2s, transform .2s; }
+.setup-choice:hover { background: var(--tt-active-surface); }
+.setup-choice:active { transform: scale(.98); }
+.setup-choice > span:nth-child(2) { flex: 1; min-width: 0; }
+.setup-choice strong { display: block; font-size: 16px; font-weight: 600; }
+.setup-choice small { display: block; margin-top: 3px; font-size: 13px; color: var(--tt-muted-text); }
+.setup-choice-icon { display: grid; place-items: center; width: 40px; height: 40px; flex-shrink: 0; border-radius: 12px; color: var(--tt-accent-strong); background: var(--tt-active-surface); }
+.setup-choice > svg { flex-shrink: 0; color: var(--tt-muted-text); }
+.setup-later { min-height: 48px; border-radius: 14px; color: var(--tt-muted-text); font-size: 14px; font-weight: 600; }
+.setup-later:hover { background: var(--tt-field); }
+.connection-load { display: grid; grid-template-columns: 20px minmax(0, 1fr) 20px; width: 100%; padding: 10px 12px; text-align: center; }
+.connection-load > svg { justify-self: center; }
+.connection-load-spacer { width: 20px; }
+
+.setup-dialog .ai-connection { border: 0; padding: 0; background: transparent; }
+.setup-dialog button:disabled { opacity: .45; cursor: default; }
+.setup-dialog button:focus-visible { outline: 2px solid var(--tt-accent-strong); outline-offset: 2px; }
+
+@media (max-width: 360px) { .setup-header h2 { font-size: 18px; } }
+
+/* The modal receives initial focus without highlighting the entire backdrop. */
+.modal-surface:focus { outline: none; }

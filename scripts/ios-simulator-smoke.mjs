@@ -4,6 +4,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
+import { ensureDistinctScreenshots } from './ios-screenshot-check.mjs';
 
 const rootDir = path.resolve(new URL('..', import.meta.url).pathname);
 const mobileDir = path.join(rootDir, 'apps/mobile');
@@ -14,6 +15,7 @@ const bundleId = process.env.IOS_SMOKE_BUNDLE_ID || 'com.backrunner.tabitomo';
 const keepArtifacts = process.env.IOS_SMOKE_KEEP_ARTIFACTS === '1';
 const verboseXcode = process.env.IOS_SMOKE_VERBOSE_XCODE === '1';
 const preferredContentSize = process.env.IOS_SMOKE_CONTENT_SIZE;
+const captureAllThemes = process.env.IOS_SMOKE_ALL_THEMES === '1';
 const requestedSmokeScenes = (process.env.IOS_SMOKE_SCENES || '')
   .split(',')
   .map((scene) => scene.trim())
@@ -130,7 +132,8 @@ const findApps = async (directory) => {
 };
 
 const findBuiltApp = async (derivedDataPath) => {
-  const productsDir = path.join(derivedDataPath, 'Build', 'Products');
+  // A reused DerivedData directory can also contain a signed device Debug app.
+  const productsDir = path.join(derivedDataPath, 'Build', 'Products', `${configuration}-iphonesimulator`);
   const apps = await findApps(productsDir);
   const preferredApp = apps.find((appPath) => path.basename(appPath) === `${scheme}.app`);
 
@@ -156,18 +159,6 @@ const ensureScreenshot = async (screenshotPath) => {
 };
 
 const hashFile = async (filePath) => createHash('sha256').update(await readFile(filePath)).digest('hex');
-
-const ensureDistinctScreenshots = async (screenshots) => {
-  const hashes = new Map();
-
-  for (const screenshot of screenshots) {
-    const hash = await hashFile(screenshot.path);
-    if (hashes.has(hash)) {
-      throw new Error(`${screenshot.name} screenshot is identical to ${hashes.get(hash)}; smoke scene did not visibly update.`);
-    }
-    hashes.set(hash, screenshot.name);
-  }
-};
 
 const startTinyModelPackServer = async () => {
   const modelBytes = Buffer.from('tabitomo tiny model pack smoke\n', 'utf8');
@@ -529,8 +520,13 @@ try {
 
   const checkSafeArea = async (scene, surface = 'workspace', suffix = scene) => {
     const file = path.join(dataContainer, 'Documents', `tabitomo-safe-area-${surface}.json`);
-    const requiresKeyboard = scene === 'main-keyboard' || scene === 'settings-keyboard';
-    const result = await waitForJsonFile(file, 20000, value => value?.scene === scene && value.passed === true && (!requiresKeyboard || value.keyboardVisible));
+    const requiresKeyboard = scene === 'main-keyboard' || scene === 'settings-keyboard' || scene === 'setup-keyboard';
+    const result = await waitForJsonFile(file, 20000, value => value?.scene === scene && value.passed === true && (!requiresKeyboard || value.keyboardVisible) && (!scene.endsWith('keyboard-dismiss') || !value.keyboardVisible)).catch(async error => {
+      const latest = await readFile(file, 'utf8').catch(() => '{}');
+      await writeFile(path.join(artifactsDir, `safe-area-${suffix}-failure.json`), latest);
+      console.error(`Failed native geometry: ${latest}`);
+      throw error;
+    });
     if (result.passed !== true) throw new Error(`Unsafe native layout: ${JSON.stringify(result)}`);
     await writeFile(path.join(artifactsDir, `safe-area-${suffix}.json`), JSON.stringify(result, null, 2));
     console.log(`Safe Area passed: ${suffix}; top=${result.insets.top}, bottom=${result.insets.bottom}, contentY=${result.inner.y}.`);
@@ -560,6 +556,7 @@ try {
   const allSmokeScenes = [
     'main',
     'main-keyboard',
+    'main-keyboard-dismiss',
     'safe-area-return',
     'settings-keyboard',
     'config-guidance',
@@ -572,6 +569,7 @@ try {
     'qr-scanner',
     'device-qa',
     'settings',
+    'settings-speech',
     'settings-image',
     'settings-jina',
     'settings-config',
@@ -588,6 +586,12 @@ try {
     'settings-model-pack-install',
     'setup-choice',
     'setup-manual',
+    'setup-keyboard',
+    'setup-keyboard-dismiss',
+    'setup-expand',
+    'setup-collapse',
+    'setup-speech',
+    'setup-image',
     'setup-import',
   ];
   const invalidRequestedScenes = requestedSmokeScenes.filter((scene) => !allSmokeScenes.includes(scene));
@@ -645,7 +649,7 @@ try {
       20000,
       (candidate) => candidate?.scene === scene,
     );
-    if (!keyboardWarmed && (scene === 'main-keyboard' || scene === 'settings-keyboard')) {
+    if (!keyboardWarmed && (scene === 'main-keyboard' || scene === 'settings-keyboard' || scene === 'setup-keyboard')) {
       // A fresh simulator presents the one-time QuickPath introduction instead
       // of keys. Reopen after that first presentation to capture the keyboard.
       keyboardWarmed = true;
@@ -656,10 +660,16 @@ try {
     // The acknowledgement is written before React commits the scene. Let the
     // native sheet presentation finish even when cold startup exceeded waitMs.
     await new Promise((resolve) => setTimeout(resolve, 1500));
-    if (['main', 'main-keyboard', 'config-guidance', 'safe-area-return'].includes(scene)) await checkSafeArea(scene);
-    if (['settings', 'settings-keyboard', 'settings-hymt2', 'setup-manual', 'language-picker', 'qr-scanner', 'device-qa'].includes(scene)) await checkSafeArea(scene, 'sheet');
-    if (scene === 'image-lightbox') await checkSafeArea(scene, 'lightbox');
     await captureScreenshot(`smoke-${scene}`);
+    if (['main', 'main-keyboard', 'main-keyboard-dismiss', 'config-guidance', 'safe-area-return'].includes(scene)) await checkSafeArea(scene);
+    if (['settings', 'settings-keyboard', 'settings-hymt2', 'settings-speech', 'settings-image', 'settings-jina', 'settings-config', 'settings-qr', 'settings-local', 'settings-model-packs', 'setup-import', 'setup-speech', 'setup-image', 'setup-choice', 'setup-manual', 'setup-keyboard', 'setup-keyboard-dismiss', 'setup-expand', 'setup-collapse', 'language-picker', 'qr-scanner', 'device-qa'].includes(scene)) await checkSafeArea(scene, 'sheet');
+    if (scene === 'image-lightbox') await checkSafeArea(scene, 'lightbox');
+    if (captureAllThemes) {
+      run('xcrun', ['simctl', '--set', deviceSetPath, 'ui', deviceId, 'appearance', 'dark']);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      await captureScreenshot(`smoke-${scene}-dark`);
+      run('xcrun', ['simctl', '--set', deviceSetPath, 'ui', deviceId, 'appearance', 'light']);
+    }
     if (scene === 'settings-qr-import') {
       const result = await waitForJsonFile(
         qrImportSmokeResultFile,

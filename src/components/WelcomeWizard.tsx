@@ -1,10 +1,11 @@
+import { ModalSurface } from './ui/ModalSurface';
 import { TranslationConnection } from './TranslationConnection';
 import { clearTranslationOverride } from '../../packages/tabitomo-core/src/providerPresets';
 import { OCRSettings } from './OCRSettings';
 import { hasProviderConnection } from '../utils/config/settings';
 import { AIConnection } from './AIConnection';
 import React, { useState, useRef, useEffect } from 'react';
-import { Settings as SettingsIcon, X, Upload, Scan, Eye, EyeOff, Mic, Image as ImageIcon, CheckCircle } from 'lucide-react';
+import { Settings as SettingsIcon, X, Upload, Scan, Eye, EyeOff, Mic, Image as ImageIcon, CheckCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { AISettings, DEFAULT_SETTINGS, normalizeSettings, type LocalAsrEngine, type LocalVadMode } from '../utils/config/settings';
 import { importConfigFromFile, importConfigFromQRCode } from '../utils/config/export';
 import { Html5Qrcode } from 'html5-qrcode';
@@ -192,81 +193,49 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onComplete
     stopQRScanner();
   };
 
+  const isChoice = currentStep === 'choice' && setupMode === 'manual';
+  const title = isChoice ? 'Set up tabitomo' : setupMode === 'import' ? 'Import config' : currentStep === 'translation' ? 'Connect a model' : currentStep === 'speech' ? 'Speech input' : 'Image translation';
+  const goBack = () => {
+    if (setupMode === 'import' && importMode) { void stopQRScanner(); setImportMode(null); }
+    else if (setupMode === 'import' || currentStep === 'translation') handleBackToChoice();
+    else setCurrentStep(currentStep === 'image' ? 'speech' : 'translation');
+  };
+
   return (
+    <ModalSurface title={title} onClose={onSkip}>
     <div
       className="safe-modal fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200"
       {...backdropCloseHandlers}
     >
-      <div className="setup-dialog relative w-full max-w-md bg-white dark:bg-gray-800 rounded-3xl shadow-2xl animate-in zoom-in-95 duration-200">
-        {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
-          <div className="flex items-center gap-3">
-            <img src="/icons/buddy.png" alt="Buddy" className="w-8 h-8" />
-            <div>
-              <h2 className="text-base sm:text-xl font-bold text-gray-800 dark:text-white">Welcome to tabitomo!</h2>
-
-            </div>
-          </div>
-          <button onClick={onSkip} className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded-lg transition-all duration-200 btn-pop" title="Skip for now">
-            <X className="w-5 h-5" />
-          </button>
+      <div data-step={isChoice ? 'choice' : 'form'} className="setup-dialog relative w-full max-w-md rounded-3xl shadow-2xl">
+        <div className="setup-header">
+          {!isChoice && <button type="button" aria-label="Back" onClick={goBack}><ChevronLeft size={21} /></button>}
+          <h2 id="setup-title">{title}</h2>
+          <button type="button" onClick={onSkip} aria-label="Skip for now"><X size={21} /></button>
         </div>
 
         {saveError && <p role="alert" className="px-6 pt-3 text-sm text-red-600 dark:text-red-400">{saveError}</p>}
         {/* Content */}
-        <div className="p-6 pt-4 max-h-[60vh] overflow-y-overlay custom-scrollbar">
-          {currentStep === 'choice' && setupMode === 'manual' && (
-            <div className="space-y-3">
-
-              {/* Manual Setup */}
-              <button
-                onClick={() => {
-                  setSetupMode('manual');
-                  setCurrentStep('translation');
-                }}
-                className="w-full p-4 border-2 border-gray-200 dark:border-gray-700 rounded-xl hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-all duration-200 cute-shadow btn-pop text-left"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-indigo-500 rounded-lg shrink-0 cute-shadow">
-                    <SettingsIcon className="w-5 h-5 text-white" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-gray-800 dark:text-white">Manual Setup</h3>
-
-                  </div>
-                </div>
-              </button>
-
-              {/* Import Settings */}
-              <button
-                onClick={() => {
-                  setSetupMode('import');
-                }}
-                className="w-full p-4 border-2 border-gray-200 dark:border-gray-700 rounded-xl hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-all duration-200 cute-shadow btn-pop text-left"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-indigo-500 rounded-lg shrink-0 cute-shadow">
-                    <Upload className="w-5 h-5 text-white" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-gray-800 dark:text-white">Import Settings</h3>
-
-                  </div>
-                </div>
-              </button>
-
-</div>
-          )}
+        <div className="setup-content custom-scrollbar">
+          {isChoice && <div className="setup-choices">
+            <button type="button" className="setup-choice" aria-label="Manual setup" onClick={() => { setSetupMode('manual'); setCurrentStep('translation'); }}>
+              <span className="setup-choice-icon"><SettingsIcon size={21} /></span>
+              <span><strong>Manual setup</strong><small>Connect your AI provider</small></span>
+              <ChevronRight size={18} />
+            </button>
+            <button type="button" className="setup-choice" aria-label="Import config" onClick={() => setSetupMode('import')}>
+              <span className="setup-choice-icon"><Upload size={21} /></span>
+              <span><strong>Import config</strong><small>Use a file or QR code</small></span>
+              <ChevronRight size={18} />
+            </button>
+            <button type="button" className="setup-later" onClick={onSkip}>Set up later</button>
+          </div>}
 
           {currentStep === 'translation' && setupMode === 'manual' && (
             <div className="space-y-4">
-              <button onClick={handleBackToChoice} className="text-sm text-indigo-600 dark:text-indigo-400 hover:underline">
-                ← Back to options
-              </button>
 
               {/* Step 1: Choose Config Mode */}
               <div className="space-y-2">
-                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300">What would you like to configure?</label>
                 <div className="grid grid-cols-2 gap-2">
                   <button onClick={() => setConfigMode('general')} className={`p-3 rounded-xl border-2 transition-all duration-200 ${configMode === 'general' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 cute-shadow' : 'border-gray-200 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}>
                     <div className="text-sm font-bold text-gray-800 dark:text-white">General AI</div>
@@ -307,18 +276,14 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onComplete
               )}
 
               <button onClick={handleImageComplete} disabled={configMode === 'general' ? !hasProviderConnection(settings.generalAI) : !hasProviderConnection(settings)} className="workspace-primary w-full justify-center">Start translating</button>
-              <button onClick={handleTranslationNext} disabled={configMode === 'general' ? !(hasProviderConnection(settings.generalAI)) : !(hasProviderConnection(settings))} className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-indigo-500 text-white font-semibold rounded-xl cute-shadow hover:bg-indigo-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 btn-pop">
-                <Mic className="w-5 h-5" />
-                Next: Speech Recognition
+              <button onClick={handleTranslationNext} disabled={configMode === 'general' ? !(hasProviderConnection(settings.generalAI)) : !(hasProviderConnection(settings))} className="setup-later w-full disabled:opacity-50">
+                Speech & image options
               </button>
             </div>
           )}
 
           {currentStep === 'speech' && (
             <div className="space-y-4">
-              <button onClick={() => setCurrentStep('translation')} className="text-sm text-indigo-600 dark:text-indigo-400 hover:underline">
-                ← Back to translation
-              </button>
 
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-bold text-gray-800 dark:text-white flex items-center gap-2">
@@ -513,9 +478,6 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onComplete
 
           {currentStep === 'image' && (
             <div className="space-y-4">
-              <button onClick={() => setCurrentStep('speech')} className="text-sm text-indigo-600 dark:text-indigo-400 hover:underline">
-                ← Back to speech
-              </button>
 
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-bold text-gray-800 dark:text-white flex items-center gap-2">
@@ -675,11 +637,6 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onComplete
 
           {setupMode === 'import' && (
             <div className="space-y-4">
-              {!importMode && (
-                <button onClick={handleBackToChoice} className="text-sm text-indigo-600 dark:text-indigo-400 hover:underline">
-                  ← Back to options
-                </button>
-              )}
 
               {!importMode ? (
                 <div className="space-y-4">
@@ -705,10 +662,6 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onComplete
                 </div>
               ) : (
                 <div className="space-y-4">
-                  <button onClick={() => { void stopQRScanner(); setImportMode(null); }} className="text-sm text-indigo-600 dark:text-indigo-400 hover:underline">
-                    ← Back to import options
-                  </button>
-
                   {/* Password Input */}
                   <div className="space-y-1.5">
                     <label htmlFor="password" className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
@@ -773,5 +726,6 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onComplete
         </div>
       </div>
     </div>
+    </ModalSurface>
   );
 };

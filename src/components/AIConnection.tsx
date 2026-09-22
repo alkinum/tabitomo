@@ -39,7 +39,7 @@ export function AIConnection({ value, onChange, children, purpose = 'general' }:
       }}><option value="">Custom endpoint</option>{presets.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</select>
     </div>
     {children}
-    <button type="button" className="connection-load" onClick={loadModels} disabled={busy || !value.endpoint}><RefreshCw size={15} className={busy ? 'animate-spin' : ''} /> Load available models</button>
+    <button type="button" className="connection-load" onClick={loadModels} disabled={busy || !value.endpoint}><RefreshCw size={15} className={busy ? 'animate-spin' : ''} /><span>Load available models</span><span aria-hidden="true" className="connection-load-spacer" /></button>
     {!!models.length && <div className="connection-models">
       <input aria-label="Search models" placeholder="Search models…" value={query} onChange={(e) => setQuery(e.target.value)} />
       {purpose === 'general' && models.some((m) => m.vision !== undefined) && <label className="connection-filter"><input type="checkbox" checked={visionOnly} onChange={(e) => setVisionOnly(e.target.checked)} /> Image-capable models</label>}

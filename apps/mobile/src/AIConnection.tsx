@@ -37,6 +37,8 @@ export function AIConnection({ value, onChange, theme, children, purpose = 'gene
     row: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
     choice: controls.choice,
     choiceText: { color: theme.accentStrong, fontSize: 12, fontWeight: '500', flexShrink: 1 },
+    loadButton: { ...controls.choice, flexDirection: 'row', alignItems: 'center', gap: 8 },
+    loadLabel: { color: theme.accentStrong, fontSize: 13, fontWeight: '600', flex: 1, textAlign: 'center' },
     provider: { minHeight: 52, flexDirection: 'row', gap: 10, alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, borderRadius: 12, backgroundColor: theme.field, borderWidth: 1, borderColor: theme.fieldBorder },
     providerName: { color: theme.text, fontSize: 14, fontWeight: '500', flexShrink: 1 },
     providerOptions: { borderWidth: 1, borderColor: theme.border, borderRadius: 12, overflow: 'hidden' },
@@ -58,7 +60,7 @@ export function AIConnection({ value, onChange, theme, children, purpose = 'gene
     </View>}
     {value.endpoint.includes('localhost') && <Text style={styles.detail}>On an iPhone, replace localhost with your computer’s LAN address. Use a reachable HTTPS endpoint if your build blocks HTTP.</Text>}
     {children}
-    <Pressable accessibilityRole="button" disabled={busy || !value.endpoint} onPress={loadModels} style={[styles.choice, styles.row, { alignItems: 'center', justifyContent: 'center', opacity: busy || !value.endpoint ? 0.5 : 1 }]}>{busy ? <ActivityIndicator color={theme.accentStrong} /> : <RefreshCw size={15} color={theme.accentStrong} />}<Text style={styles.choiceText}>Load available models</Text></Pressable>
+    <Pressable accessibilityRole="button" accessibilityLabel="Load available models" disabled={busy || !value.endpoint} onPress={loadModels} style={({ pressed }) => [styles.loadButton, { opacity: busy || !value.endpoint ? 0.5 : pressed ? 0.7 : 1 }]}><View style={{ width: 20, alignItems: 'center' }}>{busy ? <ActivityIndicator color={theme.accentStrong} /> : <RefreshCw size={15} color={theme.accentStrong} />}</View><Text style={styles.loadLabel}>Load available models</Text><View style={{ width: 20 }} /></Pressable>
     {!!models.length && <View style={{ gap: 8 }}>
       <TextInput accessibilityLabel="Search models" placeholder="Search models…" placeholderTextColor={theme.placeholder} value={query} onChangeText={setQuery} onFocus={() => setFocusedInput('query')} onBlur={() => setFocusedInput(null)} style={[styles.input, focusedInput === 'query' && controls.focused]} />
       {purpose === 'general' && models.some((m) => m.vision !== undefined) && <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: visionOnly }} onPress={() => setVisionOnly(!visionOnly)} style={styles.choice}><Text style={styles.choiceText}>{visionOnly ? '✓ ' : ''}Image-capable models</Text></Pressable>}

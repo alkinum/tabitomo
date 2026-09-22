@@ -1,0 +1,47 @@
+{
+  "scene": "setup-keyboard",
+  "name": "sheet",
+  "insets": {
+    "top": 0,
+    "right": 0,
+    "bottom": 34,
+    "left": 0
+  },
+  "outer": {
+    "height": 793,
+    "width": 393,
+    "y": 59,
+    "x": 0,
+    "scaleX": 1,
+    "scaleY": 1
+  },
+  "inner": {
+    "height": 747,
+    "width": 393,
+    "x": 0,
+    "y": 59,
+    "scaleY": 1,
+    "scaleX": 1
+  },
+  "focusedInput": {
+    "height": 85.99999999999994,
+    "y": 438.0000165303548,
+    "x": 16,
+    "width": 361,
+    "scaleX": 1,
+    "scaleY": 0.9999999999999993
+  },
+  "keyboardVisible": true,
+  "keyboardTop": 523,
+  "checks": {
+    "top": true,
+    "left": true,
+    "right": true,
+    "bottom": true,
+    "keyboard": true,
+    "focusedInput": true,
+    "nativeInsets": true,
+    "nativeScreenCoordinates": true
+  },
+  "passed": true
+}

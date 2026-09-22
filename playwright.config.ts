@@ -1,7 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
 const testPort = Number(process.env.TABITOMO_E2E_PORT || 4173);
-const testBaseURL = `http://127.0.0.1:${testPort}`;
+const testHost = process.env.TABITOMO_E2E_HOST || '127.0.0.1';
+const testBaseURL = `http://${testHost}:${testPort}`;
 
 /**
  * See https://playwright.dev/docs/test-configuration.
@@ -56,7 +57,7 @@ export default defineConfig({
 
   /* Run your local dev server before starting the tests */
   webServer: {
-    command: `pnpm preview --host 127.0.0.1 --port ${testPort} --strictPort`,
+    command: `pnpm preview --host ${testHost} --port ${testPort} --strictPort`,
     url: testBaseURL,
     reuseExistingServer: false,
     timeout: 120 * 1000,

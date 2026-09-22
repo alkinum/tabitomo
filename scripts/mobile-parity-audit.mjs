@@ -432,8 +432,8 @@ await includesAll('.agents/skills/tabitomo-platform-parity/SKILL.md', 'Project p
 ]);
 
 await includesAll('src/components/WelcomeWizard.tsx', 'Web setup/import surface', [
-  ['manual setup choice', 'Manual Setup'],
-  ['import settings choice', 'Import Settings'],
+  ['manual setup choice', 'Manual setup'],
+  ['import settings choice', 'Import config'],
   ['file import', 'handleImportFile'],
   ['QR scanner', 'startQRScanner'],
   ['translation provider form', '<TranslationConnection'],
@@ -699,6 +699,36 @@ const failures = checks.filter((check) => !check.ok);
 for (const check of checks) {
   console.log(`${check.ok ? 'ok' : 'not ok'} - ${check.message}`);
 }
+
+await includesAll('apps/mobile/App.tsx', 'Setup layout and keyboard contract', [
+  ['content sized choice sheet', "compactHeight={step === 'choice'"],
+  ['native form scroll owns keyboard', "automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}"],
+  ['header back action', 'icon={ChevronLeft} label="Back"'],
+  ['keyboard dismissal scene', 'setup-keyboard-dismiss'],
+]);
+await excludesAll('apps/mobile/App.tsx', 'Stable workspace chrome', [
+  ['no keyboard-driven brand resizing', 'styles.brandEditing'],
+  ['no disappearing mode selector', '!keyboardVisible &&'],
+]);
+await includesAll('apps/mobile/modules/tabitomo-layout/ios/TabitomoLayoutModule.swift', 'Native setup height', [
+  ['content detent', 'tabitomoCompact'], ['animate existing presentation', 'sheet.animateChanges(update)'],
+]);
+
+await includesAll('src/components/ui/ModalSurface.tsx', 'Browser popup interaction', [
+  ['shared focus and Escape primitive', '@radix-ui/react-dialog'],
+  ['keyboard-neutral initial focus', 'preventScroll: true'],
+  ['restore focus', 'onCloseAutoFocus'],
+]);
+await includesAll('apps/mobile/App.tsx', 'Accessible image preview', [
+  ['bounded preview heading', 'style={styles.lightboxHeading}'],
+  ['image-relative overlay text', 'allowFontScaling={false}'],
+]);
+await includesAll('scripts/ios-simulator-smoke.mjs', 'Whole UI review matrix', [
+  ['dark variants', 'IOS_SMOKE_ALL_THEMES'],
+  ['speech settings', 'settings-speech'],
+  ['optional speech setup', 'setup-speech'],
+  ['optional image setup', 'setup-image'],
+]);
 
 if (failures.length > 0) {
   console.error(`Mobile parity audit failed: ${failures.length}/${checks.length} checks failed.`);

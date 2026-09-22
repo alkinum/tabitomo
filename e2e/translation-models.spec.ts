@@ -70,7 +70,7 @@ test('first-run custom translation setup works when model discovery is unavailab
   await page.setViewportSize({ width: 390, height: 844 });
   await page.route('https://custom.example/v1/models', route => route.fulfill({ status: 404, headers: cors, json: {} }));
   await page.goto('/');
-  await page.getByRole('button', { name: 'Manual Setup', exact: true }).click();
+  await page.getByRole('button', { name: 'Manual setup', exact: true }).click();
   await page.getByRole('button', { name: 'Translation', exact: true }).click();
   await expect(page.getByLabel('Provider', { exact: true })).not.toContainText('SiliconFlow');
   await expect(page.getByRole('button', { name: 'Recommended Settings' })).toHaveCount(0);
@@ -80,7 +80,7 @@ test('first-run custom translation setup works when model discovery is unavailab
   await expect(page.getByRole('status').filter({ hasText: 'Could not load models' })).toContainText('enter a model ID manually');
   await page.getByLabel('Model', { exact: true }).fill('vendor/custom-translator');
   await page.getByRole('button', { name: 'Start translating', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Manual Setup', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Manual setup', exact: true })).toHaveCount(0);
   await page.reload();
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByRole('tab', { name: 'Translate', exact: true }).click();

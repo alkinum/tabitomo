@@ -1,0 +1,47 @@
+{
+  "scene": "main-keyboard",
+  "name": "workspace",
+  "insets": {
+    "left": 0,
+    "top": 59,
+    "right": 0,
+    "bottom": 34
+  },
+  "outer": {
+    "y": 0,
+    "width": 393,
+    "scaleY": 1,
+    "height": 557,
+    "x": 0,
+    "scaleX": 1
+  },
+  "inner": {
+    "height": 456,
+    "width": 393,
+    "scaleY": 1,
+    "scaleX": 1,
+    "y": 67,
+    "x": 0
+  },
+  "focusedInput": {
+    "y": 147.3333486020565,
+    "scaleY": 1,
+    "width": 320.33331298828125,
+    "x": 36.33333334326744,
+    "height": 221.66668701171875,
+    "scaleX": 1
+  },
+  "keyboardVisible": true,
+  "keyboardTop": 523,
+  "checks": {
+    "top": true,
+    "left": true,
+    "right": true,
+    "bottom": true,
+    "keyboard": true,
+    "focusedInput": true,
+    "nativeInsets": true,
+    "nativeScreenCoordinates": true
+  },
+  "passed": true
+}

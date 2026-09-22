@@ -1,5 +1,9 @@
 # tabitomo Expo Universal App Requirements
 
+## 2026-09-22 Setup and keyboard interaction
+
+Web and Expo first-run setup now start compact and expand for configuration, with header Back navigation and completion actions inside the form. iOS uses native sheet detents and scroll-owned keyboard insets. Workspace branding/modes stay stable while typing. Settings/provider/storage contracts are unchanged. See [implementation and verification boundaries](landing-keyboard-review-2026-09-22.md).
+
 ## 2026-09-21 Overall review
 
 Web request cancellation, model-cache invalidation, photo retry, voice sessions, playback/copy feedback and first-run QR/save recovery now match the existing mobile behavior contract. Production Japanese dictionary loading and HTML-safe ruby output are verified with real compressed and decoded dictionary assets. Native maximum Dynamic Type now scrolls workspace navigation and keeps the primary action reachable, with bounded branding and navigation-title scaling. Shared settings, encryption and native sync contracts are unchanged. See [review and evidence](overall-review-2026-09-21.md) for the platform impact and current verification limits.
@@ -653,3 +657,5 @@ Release candidate checks:
 ## 2026-09-20 Translation model revision
 
 Both platforms share model-family detection and dedicated translation connection updates. No pinned legacy model or forced model upgrade; OpenRouter Hy-MT2 and custom compatible model IDs use the same catalog/manual setup flow. Existing settings and encrypted imports remain compatible. See [behavior contract, official references and verification limits](translation-models.zh-CN.md). The `settings-hymt2` scene verifies the current translation form; the legacy scene was removed.
+
+- 2026-09-22 comprehensive UI review: Web dialogs share focus/Escape/scroll behavior; camera errors and late permission cleanup are covered. Native lightbox remains closable at maximum Dynamic Type, with image-relative overlay text. This is a presentation/accessibility exception; settings/provider/config contracts are unchanged. See [review scope, fixes and evidence](ui-review-2026-09-22.md).

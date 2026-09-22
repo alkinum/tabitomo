@@ -1,3 +1,4 @@
+import { ModalSurface } from './ui/ModalSurface';
 import React from 'react';
 import { X, Download } from 'lucide-react';
 
@@ -18,7 +19,8 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({ isOpen, imageUrl, 
   };
 
   return (
-    <div role="dialog" aria-modal="true" aria-label="Translated Image" onClick={onClose} className="safe-modal fixed inset-0 z-50 bg-black/90 flex flex-col p-4 animate-in fade-in duration-200">
+    <ModalSurface title="Translated Image" onClose={onClose}>
+    <div onClick={onClose} className="safe-modal fixed inset-0 z-50 bg-black/90 flex flex-col p-4 animate-in fade-in duration-200">
       {/* Header */}
       <div onClick={(event) => event.stopPropagation()} className="w-full shrink-0 pb-4">
         <div className="flex items-center justify-between">
@@ -53,5 +55,6 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({ isOpen, imageUrl, 
       </div>
 
     </div>
+    </ModalSurface>
   );
 };

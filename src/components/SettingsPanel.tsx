@@ -1,3 +1,4 @@
+import { ModalSurface } from './ui/ModalSurface';
 import { TranslationConnection } from './TranslationConnection';
 import { hasTranslationOverride } from '../../packages/tabitomo-core/src/translationConnection';
 import { clearTranslationOverride } from '../../packages/tabitomo-core/src/providerPresets';
@@ -144,12 +145,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
   const localModelInfo = getSherpaModelInfo(settings);
 
   return (
+    <ModalSurface title="Settings" onClose={() => {
+      if (showSettingsHelp) setShowSettingsHelp(false);
+      else onClose();
+    }}>
     <div
       className="safe-modal fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200"
       {...backdropCloseHandlers}
     >
       <div
-        role="dialog" aria-modal="true" aria-labelledby="settings-title"
         className="settings-dialog relative w-full rounded-3xl shadow-2xl animate-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
@@ -433,7 +437,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
                             },
                           })}
                         >
-                          <SelectTrigger>
+                          <SelectTrigger aria-label="VAD Mode">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -478,7 +482,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
                                 },
                               })}
                             >
-                              <SelectTrigger>
+                              <SelectTrigger aria-label="Whisper task">
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
@@ -506,7 +510,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
                                 },
                               })}
                             >
-                              <SelectTrigger>
+                              <SelectTrigger aria-label="SenseVoice Language">
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
@@ -703,15 +707,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
       </div>
 
       {showSettingsHelp && (
+        <ModalSurface title={SETTINGS_HELP[activeTab].title} onClose={() => setShowSettingsHelp(false)}>
         <div
           className="safe-modal fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/45"
           onClick={() => setShowSettingsHelp(false)}
         >
           <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="settings-help-title"
-            className="w-full max-w-sm rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-2xl"
+            className="w-full max-w-sm overflow-y-auto rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 shadow-2xl"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-4">
@@ -726,7 +728,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
               <button
                 type="button"
                 onClick={() => setShowSettingsHelp(false)}
-                className="shrink-0 p-2 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg"
+                className="shrink-0 min-w-11 min-h-11 p-2 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg"
                 aria-label="Close settings help"
               >
                 <X className="w-5 h-5" />
@@ -734,8 +736,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose, o
             </div>
           </div>
         </div>
+        </ModalSurface>
       )}
 
     </div>
+    </ModalSurface>
   );
 };

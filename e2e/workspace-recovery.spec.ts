@@ -175,7 +175,7 @@ test('manual setup keeps the draft and reports storage failure', async ({ page }
     };
   });
   await page.goto('/');
-  await page.getByRole('button', { name: 'Manual Setup' }).click();
+  await page.getByRole('button', { name: 'Manual setup' }).click();
   await page.getByLabel('Endpoint', { exact: true }).fill(endpoint);
   await page.getByLabel('API key', { exact: true }).fill('synthetic-key');
   await page.getByLabel('Model', { exact: true }).fill('first-model');

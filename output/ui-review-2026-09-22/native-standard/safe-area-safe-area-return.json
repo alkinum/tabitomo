@@ -1,0 +1,39 @@
+{
+  "scene": "safe-area-return",
+  "name": "workspace",
+  "insets": {
+    "left": 0,
+    "top": 59,
+    "right": 0,
+    "bottom": 34
+  },
+  "outer": {
+    "scaleX": 1,
+    "height": 852,
+    "width": 393,
+    "x": 0,
+    "y": 0,
+    "scaleY": 1
+  },
+  "inner": {
+    "height": 751,
+    "scaleX": 1,
+    "width": 393,
+    "x": 0,
+    "scaleY": 1,
+    "y": 67
+  },
+  "focusedInput": null,
+  "keyboardVisible": false,
+  "checks": {
+    "top": true,
+    "left": true,
+    "right": true,
+    "bottom": true,
+    "keyboard": true,
+    "focusedInput": true,
+    "nativeInsets": true,
+    "nativeScreenCoordinates": true
+  },
+  "passed": true
+}

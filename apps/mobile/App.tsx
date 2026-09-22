@@ -54,12 +54,14 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Sharing from 'expo-sharing';
 import * as Speech from 'expo-speech';
 import { SafeAreaProvider, initialWindowMetrics, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { SafeAreaLayout, SafeAreaAuditContext, SheetKeyboardAvoidingView, useKeyboardVisible } from './src/SafeAreaLayout';
+import { SafeAreaLayout, SafeAreaAuditContext, SheetKeyboardAvoidingView, useKeyboardVisible, useSheetHeight } from './src/SafeAreaLayout';
 import {
   ArrowLeftRight,
   Camera,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   CircleHelp,
   Cloud,
   Copy,
@@ -197,10 +199,12 @@ interface CachedTextResult {
 const SMOKE_SCENES = [
   'main',
   'main-keyboard',
+  'main-keyboard-dismiss',
   'safe-area-return',
   'settings-keyboard',
   'config-guidance',
   'settings',
+  'settings-speech',
   'settings-image',
   'settings-jina',
   'settings-config',
@@ -217,6 +221,12 @@ const SMOKE_SCENES = [
   'local-model-runtime-smoke',
   'setup-choice',
   'setup-manual',
+  'setup-keyboard',
+  'setup-keyboard-dismiss',
+  'setup-expand',
+  'setup-collapse',
+  'setup-speech',
+  'setup-image',
   'setup-import',
   'markdown',
   'longtext',
@@ -1078,6 +1088,7 @@ function AppContent() {
   const usesLargeText = fontScale > 1.3;
   const sourceToolbarButtonSize = 44;
   const keyboardVisible = useKeyboardVisible();
+  const workspaceInsets = useSafeAreaInsets();
   const [settings, setSettings] = useState<AISettings>(DEFAULT_SETTINGS);
   const [isReady, setIsReady] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -1159,14 +1170,15 @@ function AppContent() {
   }, [targetText, targetLang]);
 
   useEffect(() => {
-    if (smokeScene !== 'main-keyboard') return;
+    if (smokeScene !== 'main-keyboard' && smokeScene !== 'main-keyboard-dismiss') return;
     const timer = setTimeout(() => sourceInputRef.current?.focus(), 450);
-    return () => clearTimeout(timer);
+    const dismissTimer = smokeScene === 'main-keyboard-dismiss' ? setTimeout(() => Keyboard.dismiss(), 3500) : undefined;
+    return () => { clearTimeout(timer); clearTimeout(dismissTimer); };
   }, [smokeScene]);
 
   useEffect(() => {
     if (!usesLargeText || !sourceInputFocused || !keyboardVisible) return;
-    // Wait for the keyboard and hidden mode bar to finish changing the viewport.
+    // Wait for the keyboard to finish changing the available viewport.
     const timer = setTimeout(() => {
       const { sheetY, inputY } = sourceLayoutRef.current;
       workspaceScrollRef.current?.scrollTo({ y: Math.max(0, sheetY + inputY - 12), animated: true });
@@ -1191,13 +1203,14 @@ function AppContent() {
       ? normalizeSettings({ ...SMOKE_SETTINGS, imageOCR: { ...selectOCRMode(SMOKE_SETTINGS, 'jina'), apiKey: 'jina-smoke-key' } })
       : scene === 'settings-image' ? SMOKE_IMAGE_SETTINGS : SMOKE_SETTINGS);
     setSettingsInitialJumpId(
-      scene === 'settings-image' || scene === 'settings-jina' ? 'image' : scene === 'settings-config' ? 'config' : scene === 'settings-hymt2' ? 'translation' : null
+      scene === 'settings-image' || scene === 'settings-jina' ? 'image' : scene === 'settings-config' ? 'config' : scene === 'settings-speech' ? 'speech' : scene === 'settings-hymt2' ? 'translation' : null
     );
     setShowWelcomeWizard(false);
     setShowSettings(
       scene === 'settings'
       || scene === 'safe-area-return'
       || scene === 'settings-keyboard'
+      || scene === 'settings-speech'
       || scene === 'settings-image'
       || scene === 'settings-jina'
       || scene === 'settings-config'
@@ -1373,7 +1386,7 @@ function AppContent() {
       return;
     }
 
-    if (scene === 'setup-choice' || scene === 'setup-manual' || scene === 'setup-import') {
+    if (scene === 'setup-choice' || scene === 'setup-manual' || scene === 'setup-keyboard' || scene === 'setup-keyboard-dismiss' || scene === 'setup-expand' || scene === 'setup-collapse' || scene === 'setup-speech' || scene === 'setup-image' || scene === 'setup-import') {
       setShowWelcomeWizard(true);
       setSourceLang('ja');
       setTargetLang('en');
@@ -3305,7 +3318,7 @@ function AppContent() {
   const usesTargetOnlyLanguageBar = textMode === 'explanation' || textMode === 'qa';
   const needsSetupAttention = !isTextTranslationConfigured(settings);
   const workspaceNavigation = <>
-                {!keyboardVisible && <View pointerEvents={isVoiceRecording || busyState === 'transcribing' ? 'none' : 'auto'} accessibilityElementsHidden={isVoiceRecording}><TextModeSwitcher mode={textMode} onChange={handleSelectTextMode} /></View>}
+                <View pointerEvents={isVoiceRecording || busyState === 'transcribing' ? 'none' : 'auto'} accessibilityElementsHidden={isVoiceRecording}><TextModeSwitcher mode={textMode} onChange={handleSelectTextMode} /></View>
                 <NativeMaterial theme={theme} style={[styles.languageBar, usesLargeText && styles.languageBarLargeText, usesTargetOnlyLanguageBar && styles.languageBarTargetOnly]}>
                   {usesTargetOnlyLanguageBar ? (
                     <View style={[styles.targetLanguageOnly, usesLargeText && styles.targetLanguageOnlyLargeText]}>
@@ -3330,13 +3343,13 @@ function AppContent() {
     <AppThemeContext.Provider value={themeContext}>
       <View style={[styles.root, { backgroundColor: theme.field }]}>
           <StatusBar style={theme.statusBarStyle} />
-          <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <SafeAreaLayout name="workspace" topSpacing={8} keyboardAware>
+          <KeyboardAvoidingView enabled={!showSettings && !showWelcomeWizard && languagePickerTarget === null && !showDeviceQA && !showSmokeQrScanner} style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? -workspaceInsets.bottom : 0}>
+          <SafeAreaLayout name="workspace" topSpacing={8} keyboardAware stableBottomInset>
             <View style={styles.appShell}>
-              <View style={[styles.header, keyboardVisible && styles.headerEditing]}>
+              <View style={styles.header}>
                 <View style={styles.brandRow}>
-                  <Image source={BUDDY_IMAGE} style={[styles.brandIcon, keyboardVisible && styles.brandIconEditing]} />
-                  <Text numberOfLines={1} maxFontSizeMultiplier={1.3} style={[styles.brand, keyboardVisible && styles.brandEditing]}>tabitomo</Text>
+                  <Image source={BUDDY_IMAGE} style={styles.brandIcon} />
+                  <Text numberOfLines={1} maxFontSizeMultiplier={1.3} style={styles.brand}>tabitomo</Text>
                 </View>
                 <NativeMaterial theme={theme} style={styles.headerSettingsMaterial} interactive>
                 <Pressable
@@ -3355,7 +3368,7 @@ function AppContent() {
                 </NativeMaterial>
               </View>
 
-              <View style={[styles.appBody, isCompactViewport && styles.appBodyCompact, { paddingBottom: keyboardVisible ? 8 : (isCompactViewport ? 10 : 12) }]}>
+              <View style={[styles.appBody, isCompactViewport && styles.appBodyCompact, { paddingBottom: isCompactViewport ? 10 : 12 }]}>
                 {!usesLargeText && workspaceNavigation}
 
                 <ScrollView
@@ -3564,9 +3577,9 @@ function AppContent() {
           visible={showWelcomeWizard}
           onComplete={handleWelcomeComplete}
           onSkip={handleWelcomeSkip}
-          smokeInitialStep={smokeScene === 'setup-import'
+          smokeInitialStep={smokeScene === 'setup-speech' ? 'speech' : smokeScene === 'setup-image' ? 'image' : smokeScene === 'setup-import'
             ? 'import'
-            : smokeScene === 'setup-manual'
+            : (smokeScene === 'setup-manual' || smokeScene === 'setup-keyboard' || smokeScene === 'setup-keyboard-dismiss' || smokeScene === 'setup-collapse')
               ? 'translation'
               : smokeScene === 'setup-choice'
                 ? 'choice'
@@ -3821,6 +3834,8 @@ type PopupPanelProps = {
   baseBottomPadding?: number;
   children: React.ReactNode;
   dismissible?: boolean;
+  compactHeight?: number;
+  keyboardAvoidance?: boolean;
 };
 
 function PopupPanel(props: PopupPanelProps) {
@@ -3828,19 +3843,19 @@ function PopupPanel(props: PopupPanelProps) {
   return <AnimatedPopupPanel {...props} />;
 }
 
-function NativePopupPanel({ visible, onClose, panelStyle, children, dismissible = true }: PopupPanelProps) {
+function NativePopupPanel({ visible, onClose, panelStyle, children, dismissible = true, compactHeight, keyboardAvoidance = true }: PopupPanelProps) {
   const { styles, theme } = useAppTheme();
   const { reduceMotion } = useNativePreferences();
-  return <Modal visible={visible} presentationStyle="pageSheet" animationType={reduceMotion ? 'none' : 'slide'} allowSwipeDismissal={dismissible} onRequestClose={() => { if (dismissible) onClose(); }}>
+  const sheet = useSheetHeight(compactHeight, reduceMotion);
+  const content = <SafeAreaLayout name="sheet" keyboardAware={keyboardAvoidance} bottomSpacing={12} backgroundColor={theme.field}>
+    <View accessibilityElementsHidden style={styles.sheetGrabber} />
+    <View accessibilityViewIsModal style={[panelStyle, styles.nativeSheetContent]}>{children}</View>
+  </SafeAreaLayout>;
+  return <Modal visible={visible} presentationStyle="pageSheet" animationType={reduceMotion ? 'none' : 'slide'} onShow={sheet.onShow} allowSwipeDismissal={dismissible} onRequestClose={() => { if (dismissible) onClose(); }}>
     <SafeAreaProvider>
-      <SheetKeyboardAvoidingView backgroundColor={theme.field}>
-        <SafeAreaLayout name="sheet" keyboardAware bottomSpacing={12} backgroundColor={theme.field}>
-          <View accessibilityElementsHidden style={styles.sheetGrabber} />
-          <View accessibilityViewIsModal style={[panelStyle, styles.nativeSheetContent]}>
-            {children}
-          </View>
-        </SafeAreaLayout>
-      </SheetKeyboardAvoidingView>
+      <View ref={sheet.host} collapsable={false} onLayout={sheet.onLayout} style={styles.root}>
+        {keyboardAvoidance ? <SheetKeyboardAvoidingView backgroundColor={theme.field}>{content}</SheetKeyboardAvoidingView> : content}
+      </View>
     </SafeAreaProvider>
   </Modal>;
 }
@@ -4034,6 +4049,11 @@ function SetupWizard({
   smokeInitialStep?: SetupWizardStep;
 }) {
   const { styles, theme } = useAppTheme();
+  const auditScene = useContext(SafeAreaAuditContext);
+  const { height: windowHeight } = useWindowDimensions();
+  const [choiceHeight, setChoiceHeight] = useState(240);
+  const [headerHeight, setHeaderHeight] = useState(54);
+  const setupScrollRef = useRef<ScrollView>(null);
   const [step, setStep] = useState<SetupWizardStep>('choice');
   const [configMode, setConfigMode] = useState<SetupConfigMode>('general');
   const [draft, setDraft] = useState<AISettings>(DEFAULT_SETTINGS);
@@ -4058,6 +4078,22 @@ function SetupWizard({
       setShowQrScanner(false);
     }
   }, [smokeInitialStep, visible]);
+
+  useEffect(() => {
+    setupScrollRef.current?.scrollTo({ y: 0, animated: false });
+  }, [step]);
+  const changeStep = (next: SetupWizardStep) => {
+    Keyboard.dismiss();
+    selectionFeedback();
+    setStep(next);
+  };
+  const goBack = () => changeStep(step === 'speech' ? 'translation' : step === 'image' ? 'speech' : 'choice');
+
+  useEffect(() => {
+    if (!visible || (auditScene !== 'setup-expand' && auditScene !== 'setup-collapse')) return;
+    const timer = setTimeout(() => setStep(auditScene === 'setup-expand' ? 'translation' : 'choice'), 1500);
+    return () => clearTimeout(timer);
+  }, [auditScene, visible]);
 
   const updateGeneralAI = (patch: Partial<AISettings['generalAI']>) => {
     setDraft((current) => ({ ...current, generalAI: { ...current.generalAI, ...patch } }));
@@ -4159,46 +4195,54 @@ function SetupWizard({
 
   return (
     <>
-    <PopupPanel visible={visible} onClose={onSkip} dismissible={!isSaving && !isConfigBusy} panelStyle={styles.setupSheet}>
-          <View style={styles.sheetHeader}>
+    <PopupPanel visible={visible} onClose={onSkip} dismissible={!isSaving && !isConfigBusy} panelStyle={[styles.setupSheet, step !== 'choice' && styles.setupSheetExpanded]} compactHeight={step === 'choice' ? Math.min(windowHeight * 0.85, choiceHeight + headerHeight + 70) : undefined} keyboardAvoidance={false}>
+          <View testID="setup-header" onLayout={(event) => setHeaderHeight(event.nativeEvent.layout.height)} style={styles.setupHeader}>
+            {step !== 'choice' && <IconButton icon={ChevronLeft} label="Back" onPress={goBack} disabled={isSaving || isConfigBusy} compact />}
             <View style={styles.sheetHeaderText}>
-              <Text maxFontSizeMultiplier={2} style={styles.sheetTitle}>Set up tabitomo</Text>
+              <Text maxFontSizeMultiplier={2} style={styles.setupTitle}>{step === 'choice' ? 'Set up tabitomo' : step === 'translation' ? 'Connect a model' : step === 'import' ? 'Import config' : step === 'speech' ? 'Speech input' : 'Image translation'}</Text>
             </View>
             <IconButton icon={X} label="Skip" onPress={onSkip} disabled={isSaving || isConfigBusy} compact />
           </View>
 
 
-          <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" showsVerticalScrollIndicator={false} contentContainerStyle={styles.setupContent}>
+          <ScrollView ref={setupScrollRef} testID="setup-scroll" style={step === 'choice' ? styles.setupChoiceScroll : styles.setupFormScroll} automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'} keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'} showsVerticalScrollIndicator={false} contentContainerStyle={styles.setupContent}>
+            <View onLayout={step === 'choice' ? (event) => setChoiceHeight(event.nativeEvent.layout.height + 14) : undefined} style={styles.setupContentGroup}>
             {step === 'choice' && (
               <>
                 <Pressable
                   accessibilityRole="button"
-                  onPress={() => setStep('translation')}
+                  accessibilityLabel="Manual setup"
+                  onPress={() => changeStep('translation')}
                   style={({ pressed }) => [styles.setupChoice, pressed && styles.buttonPressed]}
                 >
-                  <Settings size={21} color={theme.accentStrong} strokeWidth={1.8} />
+                  <View style={styles.setupChoiceIcon}><Settings size={21} color={theme.accentStrong} strokeWidth={1.8} /></View>
                   <View style={styles.setupChoiceTextWrap}>
                     <Text style={styles.setupChoiceTitle}>Manual setup</Text>
+                    <Text style={styles.setupChoiceDetail}>Connect your AI provider</Text>
                   </View>
+                  <ChevronRight size={18} color={theme.mutedText} />
                 </Pressable>
                 <Pressable
                   accessibilityRole="button"
-                  onPress={() => setStep('import')}
+                  accessibilityLabel="Import config"
+                  onPress={() => changeStep('import')}
                   style={({ pressed }) => [styles.setupChoice, pressed && styles.buttonPressed]}
                 >
-                  <Import size={21} color={theme.accentStrong} strokeWidth={2.5} />
+                  <View style={styles.setupChoiceIcon}><Import size={21} color={theme.accentStrong} strokeWidth={1.8} /></View>
                   <View style={styles.setupChoiceTextWrap}>
                     <Text style={styles.setupChoiceTitle}>Import config</Text>
+                    <Text style={styles.setupChoiceDetail}>Use a file or QR code</Text>
                   </View>
+                  <ChevronRight size={18} color={theme.mutedText} />
                 </Pressable>
-                <Pressable accessibilityRole="button" style={({ pressed }) => [styles.wizardButton, pressed && styles.buttonPressed]} onPress={onSkip}>
+                <Pressable accessibilityRole="button" style={({ pressed }) => [styles.setupLaterButton, pressed && styles.buttonPressed]} onPress={onSkip}>
                   <Text style={styles.wizardButtonText}>Set up later</Text>
                 </Pressable>
               </>
             )}
 
             {step === 'translation' && (
-              <SettingsSection title="Translation service">
+              <View style={styles.setupForm}>
                 <ChoiceRow
                   options={['general', 'translation']}
                   value={configMode}
@@ -4218,7 +4262,7 @@ function SetupWizard({
                     <TranslationConnectionFields settings={draft} onChange={setDraft} />
                   </>
                 )}
-              </SettingsSection>
+              </View>
             )}
 
             {step === 'speech' && (
@@ -4309,19 +4353,11 @@ function SetupWizard({
                 {configStatus && <Text style={styles.configStatus}>{configStatus}</Text>}
               </SettingsSection>
             )}
-          </ScrollView>
+          </View>
 
           {saveError && <Text accessibilityRole="alert" style={styles.configStatus}>{saveError}</Text>}
           {step !== 'choice' && step !== 'import' && (
             <View style={styles.wizardActions}>
-              <Pressable
-                accessibilityRole="button"
-                style={({ pressed }) => [styles.wizardButton, pressed && styles.buttonPressed]}
-                disabled={isSaving}
-                onPress={() => step === 'translation' ? setStep('choice') : step === 'speech' ? setStep('translation') : setStep('speech')}
-              >
-                <Text style={styles.wizardButtonText}>Back</Text>
-              </Pressable>
               <Pressable
                 accessibilityRole="button"
                 style={({ pressed }) => [
@@ -4330,25 +4366,17 @@ function SetupWizard({
                   pressed && !(step === 'translation' && !canContinueTranslation) && styles.buttonPressed,
                 ]}
                 disabled={isSaving || (step === 'translation' && !canContinueTranslation)}
-                onPress={() => step === 'speech' ? setStep('image') : void completeWithDraft()}
+                onPress={() => step === 'speech' ? changeStep('image') : void completeWithDraft()}
               >
                 <Text style={styles.wizardButtonPrimaryText}>{isSaving ? 'Saving…' : step === 'translation' ? 'Start translating' : step === 'image' ? 'Finish setup' : 'Continue'}</Text>
               </Pressable>
             </View>
           )}
 
-          {step === 'translation' && <Pressable accessibilityRole="button" disabled={isSaving || !canContinueTranslation} onPress={() => setStep('speech')} style={styles.setupOptionalButton}><Text style={styles.choiceText}>Speech & image options</Text></Pressable>}
+          {step === 'translation' && <Pressable accessibilityRole="button" disabled={isSaving || !canContinueTranslation} onPress={() => changeStep('speech')} style={styles.setupOptionalButton}><Text style={styles.choiceText}>Speech & image options</Text></Pressable>}
 
-          {step === 'import' && (
-            <View style={styles.wizardActions}>
-              <Pressable accessibilityRole="button" style={({ pressed }) => [styles.wizardButton, pressed && styles.buttonPressed]} onPress={() => setStep('choice')}>
-                <Text style={styles.wizardButtonText}>Back</Text>
-              </Pressable>
-              <Pressable accessibilityRole="button" style={({ pressed }) => [styles.wizardButtonPrimary, pressed && styles.buttonPressed]} onPress={onSkip}>
-                <Text style={styles.wizardButtonPrimaryText}>Set up later</Text>
-              </Pressable>
-            </View>
-          )}
+          {step === 'import' && <Pressable accessibilityRole="button" disabled={isConfigBusy} style={({ pressed }) => [styles.setupLaterButton, pressed && styles.buttonPressed]} onPress={onSkip}><Text style={styles.wizardButtonText}>Set up later</Text></Pressable>}
+          </ScrollView>
       <QRScannerSheet
         visible={showQrScanner}
         onClose={() => setShowQrScanner(false)}
@@ -4417,9 +4445,9 @@ function ImageLightbox({
         <SafeAreaLayout name="lightbox">
           <StatusBar style="light" />
           <View style={styles.lightboxHeader}>
-            <View>
-              <Text style={styles.lightboxTitle}>Translated Image</Text>
-              <Text style={styles.lightboxSubtitle}>
+            <View style={styles.lightboxHeading}>
+              <Text maxFontSizeMultiplier={2} style={styles.lightboxTitle}>Translated Image</Text>
+              <Text maxFontSizeMultiplier={2} style={styles.lightboxSubtitle}>
                 {items.length ? `${items.length} overlay label${items.length === 1 ? '' : 's'}` : 'Original image preview'}
               </Text>
             </View>
@@ -4456,6 +4484,7 @@ function OverlayLabel({ item, imageSize }: { item: OverlayItem; imageSize: Image
   return (
     <View pointerEvents="none" style={[styles.overlayLabel, frame.style]}>
       <Text
+        allowFontScaling={false}
         numberOfLines={frame.maxLines}
         adjustsFontSizeToFit
         minimumFontScale={0.55}
@@ -7331,9 +7360,10 @@ function Field({
   const auditScene = useContext(SafeAreaAuditContext);
   const inputRef = useRef<TextInput>(null);
   useEffect(() => {
-    if (auditScene !== 'settings-keyboard' || label !== 'Endpoint') return;
-    const timer = setTimeout(() => inputRef.current?.focus(), 700);
-    return () => clearTimeout(timer);
+    if (!['settings-keyboard', 'setup-keyboard', 'setup-keyboard-dismiss'].includes(auditScene || '') || label !== (auditScene === 'settings-keyboard' ? 'Endpoint' : 'Model')) return;
+    const timer = setTimeout(() => inputRef.current?.focus(), 1000);
+    const dismissTimer = auditScene === 'setup-keyboard-dismiss' ? setTimeout(() => Keyboard.dismiss(), 3500) : undefined;
+    return () => { clearTimeout(timer); clearTimeout(dismissTimer); };
   }, [auditScene, label]);
   const secureInputMasked = secureTextEntry && !secureTextVisible;
   const SecureIcon = secureTextVisible ? EyeOff : Eye;
@@ -7465,9 +7495,6 @@ function createStyles(theme: AppTheme) {
   resultProgress: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 12 },
   setupOptionalButton: { minHeight: 44, alignItems: 'center', justifyContent: 'center', paddingTop: 4 },
   headerSettingsMaterial: { width: 48, height: 48, borderRadius: 24 },
-  headerEditing: { minHeight: 56, paddingTop: 0, paddingBottom: 4 },
-  brandEditing: { fontSize: 22, letterSpacing: -0.6 },
-  brandIconEditing: { width: 32, height: 32 },
   nativeModeControl: { height: 44, marginBottom: 16 },
   nativeCategoryControl: { height: 44, marginBottom: 10 },
   translationSheet: { borderRadius: 24, borderCurve: 'continuous', backgroundColor: theme.panel, borderWidth: StyleSheet.hairlineWidth, borderColor: theme.border },
@@ -7828,7 +7855,7 @@ function createStyles(theme: AppTheme) {
   },
   lightboxBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(2,6,23,0.92)',
+    backgroundColor: '#080c18',
   },
   lightboxHeader: {
     flexDirection: 'row',
@@ -7844,6 +7871,10 @@ function createStyles(theme: AppTheme) {
     fontSize: 18,
     fontWeight: '700',
   },
+  lightboxHeading: {
+    flex: 1,
+    minWidth: 0,
+  },
   lightboxSubtitle: {
     color: 'rgba(255,255,255,0.72)',
     fontSize: 12,
@@ -7851,9 +7882,10 @@ function createStyles(theme: AppTheme) {
     marginTop: 2,
   },
   lightboxCloseButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 44,
+    height: 44,
+    flexShrink: 0,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(255,255,255,0.16)',
@@ -8034,6 +8066,16 @@ function createStyles(theme: AppTheme) {
     paddingHorizontal: 16,
     paddingBottom: 10,
   },
+  setupSheetExpanded: { height: '88%' },
+  setupHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 },
+  setupTitle: { color: theme.text, fontSize: 21, fontWeight: '700', letterSpacing: -0.4, flexShrink: 1 },
+  setupChoiceScroll: { flexGrow: 0, flexShrink: 1 },
+  setupFormScroll: { flex: 1 },
+  setupContentGroup: { gap: 12 },
+  setupForm: { gap: 16 },
+  setupLaterButton: { minHeight: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 14 },
+  setupChoiceIcon: { width: 40, height: 40, borderRadius: 12, backgroundColor: theme.activeSurface, alignItems: 'center', justifyContent: 'center' },
+  setupChoiceDetail: { fontSize: 13, lineHeight: 19, color: theme.mutedText },
   setupSheet: {
     maxHeight: '88%',
     borderTopLeftRadius: 26,
@@ -8089,7 +8131,7 @@ function createStyles(theme: AppTheme) {
     paddingBottom: 14,
   },
   setupChoice: {
-    minHeight: 60,
+    minHeight: 80,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
@@ -8106,8 +8148,8 @@ function createStyles(theme: AppTheme) {
   },
   setupChoiceTitle: {
     color: theme.text,
-    fontSize: 15,
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: '600',
   },
   wizardStepRow: {
     flexDirection: 'row',

@@ -1,0 +1,39 @@
+{
+  "scene": "setup-choice",
+  "name": "sheet",
+  "insets": {
+    "top": 0,
+    "right": 0,
+    "bottom": 33.99997965494799,
+    "left": 0
+  },
+  "outer": {
+    "width": 377,
+    "scaleY": 0.9592875318066157,
+    "x": 8,
+    "y": 116.54028837998305,
+    "scaleX": 0.9592875318066157,
+    "height": 727.4596921032621
+  },
+  "inner": {
+    "scaleY": 0.9592875318066157,
+    "scaleX": 0.9592875318066157,
+    "y": 116.54028837998305,
+    "height": 683.3324656401578,
+    "x": 8,
+    "width": 377
+  },
+  "focusedInput": null,
+  "keyboardVisible": false,
+  "checks": {
+    "top": true,
+    "left": true,
+    "right": true,
+    "bottom": true,
+    "keyboard": true,
+    "focusedInput": true,
+    "nativeInsets": true,
+    "nativeScreenCoordinates": true
+  },
+  "passed": true
+}

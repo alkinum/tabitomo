@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { ModalSurface } from './ui/ModalSurface';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { X, RotateCw } from 'lucide-react';
 import { compressImage } from '../utils/image/imageCompression';
 
@@ -14,10 +15,20 @@ export const CameraPanel: React.FC<CameraPanelProps> = ({ isOpen, onClose, onCap
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
   const [isLoading, setIsLoading] = useState(false);
   const [isCompressing, setIsCompressing] = useState(false);
+  const [isReady, setIsReady] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const cameraGeneration = useRef(0);
+  const attachVideo = useCallback((node: HTMLVideoElement | null) => {
+    videoRef.current = node;
+    if (node && streamRef.current) node.srcObject = streamRef.current;
+  }, []);
 
   const startCamera = async (mode: 'user' | 'environment') => {
+    const generation = ++cameraGeneration.current;
     try {
       setIsLoading(true);
+      setIsReady(false);
+      setCameraError(null);
 
       // Stop existing stream
       if (streamRef.current) {
@@ -32,6 +43,10 @@ export const CameraPanel: React.FC<CameraPanelProps> = ({ isOpen, onClose, onCap
         }
       });
 
+      if (generation !== cameraGeneration.current) {
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
       streamRef.current = stream;
 
       if (videoRef.current) {
@@ -40,12 +55,15 @@ export const CameraPanel: React.FC<CameraPanelProps> = ({ isOpen, onClose, onCap
 
       setIsLoading(false);
     } catch (err) {
+      if (generation !== cameraGeneration.current) return;
       console.error('Camera error:', err);
+      setCameraError('Could not open the camera. Check camera access in your browser settings, then try again.');
       setIsLoading(false);
     }
   };
 
   const stopCamera = () => {
+    cameraGeneration.current += 1;
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
@@ -53,7 +71,8 @@ export const CameraPanel: React.FC<CameraPanelProps> = ({ isOpen, onClose, onCap
   };
 
   const handleCapture = async () => {
-    if (videoRef.current) {
+    const generation = cameraGeneration.current;
+    if (isReady && !isCompressing && videoRef.current?.videoWidth && videoRef.current.videoHeight) {
       const canvas = document.createElement('canvas');
       canvas.width = videoRef.current.videoWidth;
       canvas.height = videoRef.current.videoHeight;
@@ -73,14 +92,18 @@ export const CameraPanel: React.FC<CameraPanelProps> = ({ isOpen, onClose, onCap
             quality: 85
           });
 
-          onCapture(compressedImage);
-          handleClose();
+          if (generation === cameraGeneration.current) {
+            onCapture(compressedImage);
+            handleClose();
+          }
         } catch (error) {
           console.error('Compression failed:', error);
           // Fallback to uncompressed if WASM fails
-          const fallbackImage = canvas.toDataURL('image/jpeg', 0.85);
-          onCapture(fallbackImage);
-          handleClose();
+          if (generation === cameraGeneration.current) {
+            const fallbackImage = canvas.toDataURL('image/jpeg', 0.85);
+            onCapture(fallbackImage);
+            handleClose();
+          }
         } finally {
           setIsCompressing(false);
         }
@@ -113,19 +136,23 @@ export const CameraPanel: React.FC<CameraPanelProps> = ({ isOpen, onClose, onCap
   if (!isOpen) return null;
 
   return (
+    <ModalSurface title="Camera" onClose={handleClose}>
     <div className="fixed inset-0 z-50 bg-black flex flex-col">
       {/* Header */}
       <div className="safe-camera-header absolute top-0 left-0 right-0 z-10 p-4 bg-gradient-to-b from-black/60 to-transparent">
         <div className="flex items-center justify-between">
           <button
             onClick={handleClose}
-            className="p-2 bg-indigo-500 text-white hover:bg-indigo-400 rounded-full transition-colors duration-200 cute-shadow"
+            aria-label="Close camera"
+            className="min-w-11 min-h-11 p-2 bg-indigo-500 text-white hover:bg-indigo-400 rounded-full transition-colors duration-200 cute-shadow"
           >
             <X className="w-5 h-5" />
           </button>
           <button
             onClick={switchCamera}
-            className="p-2 bg-indigo-500 text-white hover:bg-indigo-400 rounded-full transition-colors duration-200 cute-shadow"
+            aria-label="Switch camera"
+            disabled={isLoading || isCompressing}
+            className="min-w-11 min-h-11 p-2 bg-indigo-500 text-white hover:bg-indigo-400 disabled:opacity-50 rounded-full transition-colors duration-200 cute-shadow"
           >
             <RotateCw className="w-5 h-5" />
           </button>
@@ -133,12 +160,16 @@ export const CameraPanel: React.FC<CameraPanelProps> = ({ isOpen, onClose, onCap
       </div>
 
       {/* Camera Preview */}
-      <div className="flex-1 relative overflow-hidden">
+      <div className="flex-1 relative overflow-hidden z-0">
         {isLoading && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black z-10">
+          <div role="status" aria-label="Opening camera" className="absolute inset-0 flex items-center justify-center bg-black z-10">
             <div className="animate-spin h-12 w-12 border-4 border-white border-t-transparent rounded-full"></div>
           </div>
         )}
+        {cameraError && <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 p-8 text-white text-center bg-black z-10">
+          <p role="alert">{cameraError}</p>
+          <button onClick={() => void startCamera(facingMode)} className="min-h-11 px-5 rounded-xl bg-indigo-500 text-white">Try again</button>
+        </div>}
         {isCompressing && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-20">
             <div className="flex flex-col items-center">
@@ -148,9 +179,11 @@ export const CameraPanel: React.FC<CameraPanelProps> = ({ isOpen, onClose, onCap
           </div>
         )}
         <video
-          ref={videoRef}
+          ref={attachVideo}
           autoPlay
           playsInline
+          muted
+          onLoadedData={() => setIsReady(true)}
           className="w-full h-full object-cover"
         />
       </div>
@@ -160,12 +193,15 @@ export const CameraPanel: React.FC<CameraPanelProps> = ({ isOpen, onClose, onCap
         <div className="flex items-center justify-center">
           <button
             onClick={handleCapture}
-            className="w-16 h-16 rounded-full bg-white hover:bg-gray-50 transition-colors duration-200 cute-shadow flex items-center justify-center"
+            aria-label="Take photo"
+            disabled={!isReady || isLoading || isCompressing}
+            className="w-16 h-16 rounded-full bg-white hover:bg-gray-50 disabled:opacity-40 transition-colors duration-200 cute-shadow flex items-center justify-center"
           >
             <div className="w-12 h-12 rounded-full bg-indigo-500 hover:bg-indigo-400 transition-colors duration-200"></div>
           </button>
         </div>
       </div>
     </div>
+    </ModalSurface>
   );
 };

@@ -1,3 +1,4 @@
+import { ModalSurface } from './ui/ModalSurface';
 import React, { useState, useRef, useEffect } from 'react';
 import { X, ArrowLeftRight, Upload, HardDriveUpload, QrCode, Scan, Eye, EyeOff, FileText } from 'lucide-react';
 import { AISettings } from '../utils/config/settings';
@@ -242,6 +243,7 @@ export const ImportExportDialog: React.FC<ImportExportDialogProps> = ({
   if (!isOpen) return null;
 
   return (
+    <ModalSurface title="Import / Export" onClose={handleClose} embedded={embedded}>
     <div
       className={embedded ? 'config-inline' : "safe-modal fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200"}
       {...(embedded ? {} : backdropCloseHandlers)}
@@ -263,7 +265,8 @@ export const ImportExportDialog: React.FC<ImportExportDialogProps> = ({
           </div>
           <button
             onClick={handleClose}
-            className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded-lg transition-all duration-200 btn-pop"
+            aria-label="Close import and export"
+            className="min-w-11 min-h-11 p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded-lg transition-all duration-200 btn-pop"
           >
             <X className="w-5 h-5" />
           </button>
@@ -469,5 +472,6 @@ export const ImportExportDialog: React.FC<ImportExportDialogProps> = ({
         </div>
       </div>
     </div>
+    </ModalSurface>
   );
 };

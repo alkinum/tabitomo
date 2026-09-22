@@ -17,7 +17,7 @@ for (const width of [320, 390]) {
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Settings', exact: true });
     await expect(dialog).toBeVisible();
-    const box = await dialog.boundingBox();
+    const box = await dialog.locator('.settings-dialog').boundingBox();
     expect(box!.y).toBeGreaterThanOrEqual(59);
     expect(box!.y + box!.height).toBeLessThanOrEqual(height - 34 + 1);
     expect(box!.x).toBeGreaterThanOrEqual(22);

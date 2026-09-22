@@ -1,4 +1,5 @@
 import { reviewTranslationModels } from './translation-model-mobile-smoke.mjs';
+import { reviewSetupLayout } from './setup-layout-review.mjs';
 import { createServer } from 'node:http';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -306,15 +307,16 @@ try {
 
   await page.getByText('tabitomo').first().waitFor({ state: 'visible' });
   await page.getByText('Set up tabitomo').waitFor({ state: 'visible' });
+  await reviewSetupLayout(page, { mobile: true, screenshots: path.join(rootDir, 'output/landing-review/expo') });
   await page.getByText('Import config').click();
   await page.getByText('Import encrypted config').waitFor({ state: 'visible' });
   await page.getByPlaceholder('Required for import').fill(importPassword);
   await page.getByPlaceholder('Encrypted .ttconfig payload').fill(encryptedConfigPayload);
   await page.getByRole('button', { name: 'Import pasted payload' }).click();
-  await page.getByText('Set up tabitomo').waitFor({ state: 'detached' });
+  await page.getByTestId('setup-header').waitFor({ state: 'detached' });
   await page.getByText('Source').waitFor({ state: 'visible' });
   await page.reload({ waitUntil: 'networkidle' });
-  await page.getByText('Set up tabitomo').waitFor({ state: 'detached' });
+  await page.getByTestId('setup-header').waitFor({ state: 'detached' });
   await page.getByText('Source').waitFor({ state: 'visible' });
 
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
@@ -343,12 +345,12 @@ try {
   await page.getByText('Import config').waitFor({ state: 'visible' });
 
   await page.getByText('Manual setup').click();
-  await page.getByText('Translation service', { exact: true }).waitFor({ state: 'visible' });
+  await page.getByText('Connect a model', { exact: true }).waitFor({ state: 'visible' });
   if (await page.getByText('OpenAI Chat', { exact: true }).count()) throw new Error('Legacy protocol picker remains.');
   await page.getByPlaceholder('https://api.openai.com/v1').waitFor({ state: 'visible' });
   await page.getByPlaceholder('sk-...').first().waitFor({ state: 'visible' });
 
-  await page.getByText('Back').click();
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
   await page.getByText('Import config').click();
   await page.getByText('Import encrypted config').waitFor({ state: 'visible' });
   await page.getByPlaceholder('Required for import').waitFor({ state: 'visible' });
@@ -356,7 +358,7 @@ try {
   await page.getByText('Scan QR').waitFor({ state: 'visible' });
 
   await page.getByText('Set up later').click();
-  await page.getByText('Set up tabitomo').waitFor({ state: 'detached' });
+  await page.getByTestId('setup-header').waitFor({ state: 'detached' });
   await page.getByText('Source').waitFor({ state: 'visible' });
   await page.getByText('Translation', { exact: true }).waitFor({ state: 'visible' });
 
@@ -437,7 +439,7 @@ try {
   await page.getByRole('button', { name: 'Save settings' }).click();
   await page.getByText('Settings saved securely on this device.').waitFor({ state: 'visible' });
   await page.reload({ waitUntil: 'networkidle' });
-  await page.getByText('Set up tabitomo').waitFor({ state: 'detached' });
+  await page.getByTestId('setup-header').waitFor({ state: 'detached' });
   await page.getByText('Source').waitFor({ state: 'visible' });
 
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
@@ -661,7 +663,7 @@ try {
       const tabBar = page.getByRole('tablist', { name: 'Settings sections' });
       const navY = (await tabBar.boundingBox()).y;
       const saveY = (await page.getByRole('button', { name: 'Save settings' }).boundingBox()).y;
-      for (const label of ['Translate', 'Image', 'Data']) {
+      for (const label of ['Translate', 'Speech', 'Image', 'Offline', 'Data']) {
         const tab = page.getByRole('tab', { name: `${label} settings` });
         await tab.click();
         await page.getByRole('tab', { name: `${label} settings`, selected: true }).waitFor({ state: 'visible' });

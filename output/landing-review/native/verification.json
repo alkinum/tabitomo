@@ -1,0 +1,80 @@
+{
+  "passed": true,
+  "scenes": 10,
+  "themes": 2,
+  "screenshotCheck": "passed; equivalent restored setup states may match",
+  "checks": [
+    {
+      "file": "safe-area-first-screen-dark.json",
+      "scene": "main",
+      "keyboardVisible": false,
+      "passed": true
+    },
+    {
+      "file": "safe-area-first-screen-light.json",
+      "scene": "main",
+      "keyboardVisible": false,
+      "passed": true
+    },
+    {
+      "file": "safe-area-main-keyboard-dismiss.json",
+      "scene": "main-keyboard-dismiss",
+      "keyboardVisible": false,
+      "passed": true
+    },
+    {
+      "file": "safe-area-main-keyboard.json",
+      "scene": "main-keyboard",
+      "keyboardVisible": true,
+      "passed": true
+    },
+    {
+      "file": "safe-area-safe-area-return.json",
+      "scene": "safe-area-return",
+      "keyboardVisible": false,
+      "passed": true
+    },
+    {
+      "file": "safe-area-settings-keyboard.json",
+      "scene": "settings-keyboard",
+      "keyboardVisible": true,
+      "passed": true
+    },
+    {
+      "file": "safe-area-setup-choice.json",
+      "scene": "setup-choice",
+      "keyboardVisible": false,
+      "passed": true
+    },
+    {
+      "file": "safe-area-setup-collapse.json",
+      "scene": "setup-collapse",
+      "keyboardVisible": false,
+      "passed": true
+    },
+    {
+      "file": "safe-area-setup-expand.json",
+      "scene": "setup-expand",
+      "keyboardVisible": false,
+      "passed": true
+    },
+    {
+      "file": "safe-area-setup-keyboard-dismiss.json",
+      "scene": "setup-keyboard-dismiss",
+      "keyboardVisible": false,
+      "passed": true
+    },
+    {
+      "file": "safe-area-setup-keyboard.json",
+      "scene": "setup-keyboard",
+      "keyboardVisible": true,
+      "passed": true
+    },
+    {
+      "file": "safe-area-setup-manual.json",
+      "scene": "setup-manual",
+      "keyboardVisible": false,
+      "passed": true
+    }
+  ]
+}
